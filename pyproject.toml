@@ -1,0 +1,46 @@
+[project]
+name = "ue5-mcp"
+version = "0.1.0"
+description = "Model Context Protocol server for Unreal Engine 5 game development"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Your Name" }]
+keywords = ["mcp", "unreal-engine", "ue5", "game-development"]
+dependencies = [
+    "mcp>=1.6.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.0",
+]
+
+[project.scripts]
+ue5-mcp = "ue5_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["src/ue5_mcp"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/ue5_mcp" = "ue5_mcp"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
