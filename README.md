@@ -89,59 +89,135 @@ flowchart LR
   Server -.->|future| Cmd[UnrealEditor-Cmd]
 ```
 
-## Paths you can take (tailor to your games)
+## Paths I'm considering for building this MCP
 
-Pick one primary **depth** strategy; you can combine them later.
+I can combine these later, but it helps to pick a **main** direction first. This section explains each path in plain language (not just jargon).
 
-### 1. Remote Control API only (fastest)
+### 1. Remote Control only — talk to the editor over its built-in web API
 
-**Best for:** property tweaks, calling exposed Blueprint functions, level inspection, live tuning.
+**What I'd be doing:** Unreal has a plugin called **Remote Control API**. When it's on, the editor acts like a small web server on my machine (usually port `30010`). This MCP server sends HTTP requests — "list this," "change that property," "call this Blueprint function."
 
-- Extend `UEClient` with Remote Control presets, `PUT` property routes, batch calls.
-- Add tools: `list_actors`, `get_property`, `set_property`, `call_function`.
-- **Game types:** any project that exposes gameplay via Blueprint-callable functions and RC presets (simulation, archviz, live ops).
+**In simple terms:** I'm not writing Unreal code yet. I'm building a **remote control** for the editor that already exists, and my AI agent uses MCP tools to press those buttons.
 
-### 2. Editor scripting + Python plugin
+**Technically:** extend `UEClient` with Remote Control presets, property routes, and batch calls; add tools like `list_actors`, `get_property`, `set_property`, `call_function`.
 
-**Best for:** asset pipeline, bulk imports, Sequencer, Editor Utility Widgets.
+**Good if:** I want to move actors, tweak values, call Blueprint functions I've already exposed, and iterate while the editor is open.
 
-- Add a UE **Editor Python** script layer or plugin that listens on a local socket; MCP tools send JSON commands.
-- **Game types:** content-heavy (open world, RPG inventories, narrative pipelines), tooling/automation.
+**Not great if:** I need to edit Blueprint graphs node-by-node or do things the API doesn't expose.
 
-### 3. Custom C++ Automation Bridge plugin
+---
 
-**Best for:** Blueprint graph edits, spawning arbitrary classes, deep editor APIs, safer sandboxing.
+### 2. Editor Python / utility scripts — automate boring editor work
 
-- Ship `plugins/YourMcpBridge` in this repo; MCP talks HTTP/WebSocket to the plugin (see community projects like ChiR24/Unreal_mcp, remiphilippe/mcp-unreal).
-- **Game types:** complex systems (multiplayer, GAS abilities, procedural generation, custom editors).
+**What I'd be doing:** Unreal can run **Python inside the editor** (for tooling, not usually for shipped game logic). I write scripts that import assets, batch-rename things, drive Sequencer, etc. My MCP server tells those scripts what to run.
 
-### 4. Headless / CI (no editor UI)
+**In simple terms:** The agent doesn't "become" Unreal — it **runs helper scripts** in my project, and those scripts do the work in the editor.
 
-**Best for:** builds, tests, cooking, validation from the agent or CI.
+**Technically:** add an Editor Python layer or plugin that listens on a local socket; MCP tools send JSON commands to it.
 
-- Tools wrap `UnrealEditor-Cmd`, UAT, Gauntlet; use `UE_PROJECT_PATH` from config.
-- **Game types:** teams with automated test maps, nightly builds, compliance checks.
+**Good if:** My game is **content-heavy** (lots of levels, assets, cinematics) and I care more about pipeline speed than live combat tweaking.
 
-### 5. Genre-focused tool packs
+**Not great if:** I mainly need real-time gameplay control while playing in the editor.
 
-Split `tools/` into modules and only enable what you need:
+---
+
+### 3. C++ bridge plugin — a custom middleman inside Unreal
+
+**What the words mean:**
+
+- **Plugin** — extra code I drop into my project's `Plugins` folder; Unreal loads it when the project opens.
+- **Bridge** — the **middleman** between my MCP server (Python, outside Unreal) and the editor (inside Unreal).
+  - Outside: Cursor → my MCP server
+  - Middle: the bridge (often HTTP or WebSocket **inside** the editor)
+  - Inside: Unreal does the real work (spawn actors, edit Blueprints, etc.)
+- **C++** — that middleman is written in C++, which is how most serious editor features are built in UE. Python MCP can't call deep editor APIs directly; the plugin can.
+
+**In simple terms:** I'm building a **custom remote control that lives inside Unreal**, because the built-in Remote Control API isn't enough. My MCP server sends messages like "spawn this" or "add this Blueprint node," and the plugin understands Unreal's internal APIs.
+
+**Technically:** ship something like `plugins/YourMcpBridge` in this repo; MCP talks HTTP/WebSocket to the plugin. Community examples: [ChiR24/Unreal_mcp](https://github.com/ChiR24/Unreal_mcp), [remiphilippe/mcp-unreal](https://github.com/remiphilippe/mcp-unreal).
+
+**Good if:** I want **deep control** — Blueprint editing, custom tools, "AI using the editor like a human."
+
+**Cost:** more work (C++ compile times, UE version updates, maintaining a plugin).
+
+---
+
+### 4. Headless / CI — builds and tests without the editor UI
+
+**What the words mean:**
+
+- **Headless** — run Unreal **without the normal editor window** (command-line mode). No clicking in viewports — just commands.
+- **CI** (continuous integration) — automated checks on every commit/PR: build the game, run tests, catch breakages before I merge.
+
+**What I'd be doing:** My MCP (or a CI script) runs commands like "build this project," "run these automated tests," "cook content for a platform" — using Unreal's command-line tools (`UnrealEditor-Cmd`, etc.), not the visual editor.
+
+**In simple terms:** The agent helps with **factory work** — "does it compile?", "do tests pass?" — not "move this lamp two units left in the level."
+
+**Technically:** tools wrap `UnrealEditor-Cmd`, UAT, Gauntlet; use `UE_PROJECT_PATH` from config.
+
+**Good if:** I care about **stable builds and automated testing**.
+
+**Not a replacement for:** live level design while I'm in the editor.
+
+---
+
+### 5. Genre tool packs — only expose tools my game actually needs
+
+**What I'd be doing:** Instead of one giant "do everything in Unreal" MCP, I split `tools/` into **packs** and only enable what matches my game:
 
 | Pack | Example tools | Fits |
 |------|----------------|------|
 | **FPS / action** | spawn weapon pickups, configure character movement, damage volumes | Shooter prototypes |
-| **Narrative** | Dialogue assets, level sequences, trigger volumes | Story games |
-| **Multiplayer** | replicate settings, player starts, network profiling hooks | Online games |
+| **Narrative** | dialogue assets, level sequences, trigger volumes | Story games |
+| **Multiplayer** | player starts, replication settings, network profiling hooks | Online games |
 | **Mobile / casual** | UI widgets, touch input presets, LOD/cook profiles | Mobile titles |
 | **Procedural** | PCG graphs, landscape layers, instanced meshes | Roguelikes, open worlds |
 
-### 6. Safety and UX layers
+**In simple terms:** I'm **curating the agent's toolbox** so it doesn't get dozens of irrelevant tools and make weird choices.
 
-- **Mock mode** (included): develop MCP tools without UE running.
-- **Read-only default**, explicit `confirm=true` on destructive tools.
-- **Capability tokens** if you expose the bridge on LAN.
-- **Resources** for “current selection” so the agent asks before deleting.
+**Good if:** I know my genre early and want safer, more focused behavior.
 
-## Next steps (suggested order)
+---
+
+### 6. Safety layer — guardrails so the agent doesn't wreck my project
+
+**What I'd be doing:** Rules around dangerous actions:
+
+- **Mock mode** (included) — fake responses when UE isn't running; good for building MCP without the editor open.
+- **Read-only by default** — agent can look, not delete, until I allow it.
+- **Confirm destructive stuff** — e.g. "delete all actors in level" needs an explicit yes.
+- **Tokens / LAN** — if the bridge listens on the network, only trusted clients can connect.
+
+**In simple terms:** I treat the agent like a **junior dev with permissions**, not root access to my whole project.
+
+**Technically:** read-only defaults, `confirm=true` on destructive tools, capability tokens on LAN, resources for "current selection" so the agent checks before deleting.
+
+---
+
+### How I might choose
+
+| If my main goal is… | I'd probably start with… |
+|---------------------|---------------------------|
+| Place things and tweak gameplay while the editor is open | **Remote Control only** (path 1) |
+| Tons of assets and pipeline grunt work | **Editor Python** (path 2) |
+| AI edits Blueprints and does "real editor" tasks | **C++ bridge plugin** (path 3) |
+| Builds and tests run automatically | **Headless / CI** (path 4) |
+| Building one type of game and want focus | **Genre tool packs** (path 5) |
+| Scared of the agent deleting my level | **Safety layer** (path 6) — often combined with another path |
+
+**Realistic combo:** start with **path 1** (what this repo is aimed at), add **path 6** early, then add **path 3** only when I hit a wall ("Remote Control can't do X"). **Path 4** is separate — useful when I care about builds/tests, not day-one level design.
+
+### One-sentence cheat sheet
+
+| Term | Meaning |
+|------|---------|
+| **Remote Control** | Use Unreal's built-in HTTP remote for the editor. |
+| **C++ bridge plugin** | My own small program *inside* Unreal that obeys my MCP server. |
+| **Headless / CI** | Unreal with no UI, for builds and automated tests. |
+| **Genre packs** | Only give the agent tools that match my game type. |
+| **Safety layer** | Mock mode, confirmations, and limits so mistakes stay small. |
+
+## Next steps
 
 1. Verify mock mode and Cursor MCP wiring.
 2. With UE open, harden `ue_ping` against your UE version’s Remote Control routes.
