@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ue5-mcp</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header>
+        <div class="brand">
+          <h1>ue5-mcp</h1>
+          <p>Unreal Engine 5 Model Context Protocol server</p>
+        </div>
+        <div id="status-pill" class="status-pill disconnected" aria-live="polite">
+          <span class="dot"></span>
+          <span id="status-label">Checking…</span>
+        </div>
+      </header>
+
+      <section class="connection-panel" aria-labelledby="connection-heading">
+        <h2 id="connection-heading">Connection</h2>
+        <div class="connection-grid">
+          <div class="connection-item">
+            <label>Project</label>
+            <span id="project-name">—</span>
+          </div>
+          <div class="connection-item">
+            <label>Mode</label>
+            <span id="connection-mode">—</span>
+          </div>
+          <div class="connection-item">
+            <label>Editor endpoint</label>
+            <span id="editor-endpoint" class="mono">—</span>
+          </div>
+          <div class="connection-item">
+            <label>Project path</label>
+            <span id="project-path" class="mono">—</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="tools" aria-labelledby="tools-heading">
+        <h2 id="tools-heading">Tools <span id="tool-count" class="tool-count"></span></h2>
+        <div id="tools-container" class="loading">Loading tools…</div>
+      </section>
+
+      <footer>Auto-refreshes every 10 seconds · <code>uv run ue5-mcp-ui</code></footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

@@ -23,6 +23,7 @@ dev = [
 
 [project.scripts]
 ue5-mcp = "ue5_mcp.server:main"
+ue5-mcp-ui = "ue5_mcp.ui.server:main"
 
 [build-system]
 requires = ["hatchling"]
