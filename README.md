@@ -73,14 +73,55 @@ AI (Claude / Cursor)
 
 ## Current State
 
-### Tools available now
+### Layer 1 tools
 
 | Tool | Description |
 |------|-------------|
 | `ue_ping` | Check connectivity to the Unreal Editor Remote Control API |
 | `ue_get_editor_info` | Return basic editor connection info |
-| `list_project_assets` | **Return all project assets grouped by category** |
+| `list_project_assets` | Return all project assets grouped by category |
 | `list_asset_categories` | Return all supported category keys (for filtering) |
+
+### Layer 2 tools *(new)*
+
+**Actor Management**
+
+| Tool | Description |
+|------|-------------|
+| `list_actors` | Return all actors in the current level with transforms and metadata |
+| `spawn_actor` | Spawn any Blueprint or native actor at a world transform |
+| `move_actor` | Set actor location, rotation, or scale |
+| `delete_actor` | Remove an actor (dry_run=true supported) |
+| `set_actor_property` | Set any Remote Control-exposed property on an actor |
+| `get_actor_property` | Read a property from a specific actor |
+| `find_actors_by_tag` | Search actors by tag, class, or display name |
+| `select_actors` | Programmatically select actors in the editor viewport |
+
+**Level Management**
+
+| Tool | Description |
+|------|-------------|
+| `list_levels` | List all levels including sub-levels and World Partition awareness |
+| `open_level` | Open a map by /Game/... path |
+| `save_current_level` | Save the current level |
+| `set_world_settings` | Configure gravity, time dilation, and kill-Z |
+
+**Foliage & Environment Population**
+
+| Tool | Description |
+|------|-------------|
+| `spawn_foliage` | Place foliage with density, scale variation, seeded randomisation |
+| `clear_foliage` | Remove foliage by mesh type or region |
+| `configure_lod` | Set LOD screen-size thresholds for a StaticMesh |
+| `generate_collision` | Auto-generate collision for a StaticMesh asset |
+
+**Landscape & PCG**
+
+| Tool | Description |
+|------|-------------|
+| `list_landscape_layers` | Return all landscape layers and their material assignments |
+| `paint_landscape_layer` | Apply layer weight to a landscape region |
+| `configure_pcg_graph` | Read and update exposed parameters on a PCG Graph Component |
 
 ### Resources
 
@@ -141,52 +182,243 @@ Static Meshes · Skeletal Meshes · Skeletons · Physics Assets · Materials · 
 
 ---
 
-## Layer 2 · Environment Tools — *Planned*
+## Layer 2 · Environment Tools — *Done*
 
 > **Let the AI place, configure, and modify things in the world.**
 
-These tools connect Claude directly to level editing tasks — the kinds of things that take hours of manual work.
+These tools connect Claude directly to level editing tasks — the kinds of things that take hours of manual work.  All 19 tools work in mock mode (`UE_MOCK_MODE=true`) with no live editor required.
 
-### Planned tools
+### Architecture
 
-**Actor management**
+```
+tools/environment.py          ← 19 MCP tool definitions
+bridge/client.py              ← UE Remote Control API calls + mock implementations
+```
 
-| Tool | Description |
-|------|-------------|
-| `list_actors` | Return all actors in the current level with transforms and properties |
-| `spawn_actor` | Spawn any Blueprint or native actor at a location |
-| `move_actor` | Set actor position, rotation, scale |
-| `delete_actor` | Remove an actor (confirm=true required) |
-| `set_actor_property` | Set any exposed property on an actor |
-| `get_actor_property` | Read a property from a specific actor |
-| `find_actors_by_tag` | Search actors by tag or class |
-| `select_actors` | Programmatically select actors in the editor |
+**Transport strategy per operation type:**
 
-**Foliage & environment population**
+| Operation type | Transport |
+|----------------|-----------|
+| Actor list / query / select | `EditorActorSubsystem` via Remote Control |
+| Actor spawn | `EditorLevelLibrary.SpawnActorFromObject` via Remote Control |
+| Actor move / scale / rotate | `K2_SetActorLocation` / `K2_SetActorRotation` / `SetActorScale3D` on actor object |
+| Actor property read/write | `/remote/object/property` with READ/WRITE access |
+| Level load / save | `EditorLevelLibrary.LoadLevel` / `SaveCurrentLevel` via Remote Control |
+| World settings | `/remote/object/property` on WorldSettings actor |
+| Foliage / collision / LOD | Python Script Plugin (`ExecutePythonCommand`) — editor Python API |
+| Landscape / PCG | Python Script Plugin — landscape weight and PCG component APIs |
 
-| Tool | Description |
-|------|-------------|
-| `spawn_foliage` | Place foliage with scale variation, density, and avoidance zones |
-| `clear_foliage` | Remove foliage by mesh or region |
-| `configure_lod` | Set LOD distances and settings for a mesh |
-| `generate_collision` | Auto-generate collision for a static mesh |
+### Phase 1 · Actor Management
 
-**Level management**
+#### `list_actors`
 
-| Tool | Description |
-|------|-------------|
-| `list_levels` | List all levels including sub-levels and World Partition cells |
-| `open_level` | Open a map by name or path |
-| `save_current_level` | Save the current level |
-| `set_world_settings` | Configure gravity, time dilation, and other world settings |
+Returns all actors in the current level. Supports optional filtering by class, folder path, and hidden state.
 
-**Landscape & terrain**
+```json
+{
+  "actors": [
+    {
+      "name": "BP_EnemyBase_0",
+      "class": "BP_EnemyBase_C",
+      "location": {"x": 500.0, "y": 300.0, "z": 0.0},
+      "rotation": {"pitch": 0.0, "yaw": 180.0, "roll": 0.0},
+      "scale":    {"x": 1.0,   "y": 1.0,   "z": 1.0},
+      "tags": ["Enemy", "AI"],
+      "folder_path": "Actors/Enemies",
+      "level": "PersistentLevel",
+      "is_selected": false,
+      "is_hidden": false
+    }
+  ],
+  "total": 10,
+  "level": "L_TestLevel"
+}
+```
 
-| Tool | Description |
-|------|-------------|
-| `list_landscape_layers` | Return all landscape layers and their materials |
-| `paint_landscape_layer` | Apply a layer weight to a landscape region |
-| `configure_pcg_graph` | Set parameters on a PCG (Procedural Content Generation) graph |
+**Example prompts:**
+
+```
+"What actors are currently in the level?"
+"List all lights in the level."
+"Show me every actor in the Environment/Rocks folder."
+```
+
+#### `spawn_actor`
+
+Spawns a Blueprint or native actor at a world transform.
+
+```json
+{
+  "spawned_actor": "BP_Enemy_mock",
+  "object_path": "/Game/Maps/L_TestLevel.L_TestLevel:PersistentLevel.BP_Enemy_mock",
+  "asset_path":  "/Game/Characters/BP_EnemyBase.BP_EnemyBase",
+  "transform": {
+    "location": {"x": 500.0, "y": 0.0, "z": 0.0},
+    "rotation": {"pitch": 0.0, "yaw": 90.0, "roll": 0.0},
+    "scale":    {"x": 1.0, "y": 1.0, "z": 1.0}
+  }
+}
+```
+
+**Example prompts:**
+
+```
+"Spawn 10 BP_Enemy actors around the player start location."
+"Place a BP_Door_Automatic at (500, 0, 0) facing north."
+```
+
+#### `move_actor`
+
+Moves, rotates, or scales an actor. Returns before/after transforms.
+
+```json
+{
+  "actor": "SM_Rock_01_0",
+  "success": true,
+  "before": {"location": {"x": 1200.0, "y": -800.0, "z": 0.0}, "...": "..."},
+  "after":  {"location": {"x": 1200.0, "y": -800.0, "z": 200.0}, "...": "..."}
+}
+```
+
+**Example prompts:**
+
+```
+"Move all PointLight actors upward by 200 units."
+"Rotate SM_Rock_01_0 so its yaw is 45 degrees."
+```
+
+#### `delete_actor`, `set_actor_property`, `get_actor_property`, `find_actors_by_tag`, `select_actors`
+
+Standard actor manipulation tools.  All support dry_run or partial matching.  See tool docstrings for full parameter descriptions.
+
+---
+
+### Phase 2 · Level Management
+
+#### `list_levels`
+
+Returns persistent + streaming sub-levels with load/visibility/dirty state and World Partition flag.
+
+```json
+{
+  "levels": [
+    {"name": "PersistentLevel", "package_path": "/Game/Maps/L_TestLevel",
+     "is_persistent": true, "is_loaded": true, "is_dirty": false}
+  ],
+  "current_world": "/Game/Maps/L_TestLevel",
+  "world_partition_enabled": false
+}
+```
+
+#### `open_level`, `save_current_level`
+
+```
+"Open Arena_Map and save it."
+→ open_level('/Game/Maps/L_Arena') → save_current_level()
+```
+
+#### `set_world_settings`
+
+```json
+{
+  "applied": ["gravity_z", "game_time_dilation"],
+  "before": {"gravity_z": -980.0, "game_time_dilation": 1.0},
+  "after":  {"gravity_z": -490.0, "game_time_dilation": 0.5}
+}
+```
+
+**Example prompts:**
+
+```
+"Set gravity to half of normal."
+"Enable slow-motion by setting time dilation to 0.3."
+```
+
+---
+
+### Phase 3 · Foliage Systems
+
+#### `spawn_foliage`
+
+Places foliage instances across a defined region.  Density, scale range, seed, and area bounds are all configurable.
+
+```json
+{
+  "mesh": "SM_Tree_Oak",
+  "instances_placed": 487,
+  "area_m2": 10000.0,
+  "density_per_100m2": 50.0,
+  "scale_range": [0.9, 1.4],
+  "seed": 42
+}
+```
+
+**Example prompts:**
+
+```
+"Populate this forest with 500 trees using SM_Tree_Oak, random scale 0.8–1.4."
+"Place dense grass (SM_GrassMeadow) across a 200×200m area."
+```
+
+#### `clear_foliage`, `configure_lod`, `generate_collision`
+
+Foliage removal, LOD threshold configuration, and collision generation.  All return before/after state for auditability.
+
+---
+
+### Phase 4 · Landscape & PCG Foundation
+
+#### `list_landscape_layers`
+
+```json
+{
+  "layers": [
+    {"name": "Grass", "layer_info_path": "/Game/Landscape/Layers/LI_Grass",
+     "is_weight_blended": true, "average_weight": 0.62},
+    {"name": "Dirt", "layer_info_path": "/Game/Landscape/Layers/LI_Dirt",
+     "is_weight_blended": true, "average_weight": 0.24}
+  ],
+  "total": 4
+}
+```
+
+#### `paint_landscape_layer`, `configure_pcg_graph`
+
+Landscape weight painting and PCG graph parameter updates.  Both tools return affected area / parameter diff for confirmation before committing.
+
+> **Live mode note:** Full landscape weight painting requires either the Python Script Plugin (partial support) or a custom C++ editor plugin for precise control.  The tool is designed to be upgraded with better APIs without breaking the MCP interface.
+
+---
+
+### Mock mode behaviour
+
+Every Layer 2 tool returns rich, realistic data when `UE_MOCK_MODE=true`:
+
+| Tool | Mock data source |
+|------|-----------------|
+| `list_actors` | 10 pre-defined mock actors (lights, meshes, Blueprints, Landscape) |
+| `list_levels` | 3 mock levels (1 persistent, 1 loaded sub-level, 1 unloaded sub-level) |
+| `list_landscape_layers` | 4 layers: Grass, Dirt, Rock, Snow |
+| `spawn_foliage` | Calculates realistic instance count from density × area |
+| All write tools | Echo input parameters with before/after diffs |
+
+```bash
+# Run in mock mode — no Unreal editor required
+UE_MOCK_MODE=true uv run ue5-mcp
+```
+
+---
+
+### Editor requirements for live mode
+
+| Tool group | Required UE plugins |
+|------------|---------------------|
+| All actor tools | Editor Scripting Utilities |
+| Level tools | Editor Scripting Utilities |
+| Foliage / collision / LOD | Python Script Plugin + FoliageEdit module |
+| Landscape / PCG | Python Script Plugin + PCG Plugin (UE 5.2+) |
+
+Enable plugins via **Edit → Plugins** in the editor, then restart.  The Remote Control API plugin must also be enabled (default HTTP port 30010).
 
 ---
 
@@ -359,7 +591,7 @@ Cursor / Claude
       ├── tools/          ← agent actions
       │    ├── editor.py       (ping, editor info)
       │    ├── assets.py       ← Layer 1 · done
-      │    ├── environment.py  ← Layer 2 · planned
+      │    ├── environment.py  ← Layer 2 · done  ← NEW
       │    ├── blueprints.py   ← Layer 3 · planned
       │    ├── debugging.py    ← Layer 4 · planned
       │    └── testing.py      ← Layer 5 · planned
@@ -368,7 +600,7 @@ Cursor / Claude
       ├── prompts/        ← workflow templates
       │
       └── bridge/         ← transport to Unreal
-           ├── client.py          (Remote Control HTTP)
+           ├── client.py          (Remote Control HTTP + Python execution)
            ├── asset_registry.py  (27-category classification engine)
            └── asset_scanner.py   (filesystem Content/ scanner)
 ```
@@ -396,18 +628,20 @@ ue5-mcp/
 │   ├── server.py                     # FastMCP entry — registers all primitives
 │   ├── config.py                     # Pydantic settings from environment
 │   ├── bridge/
-│   │   ├── client.py                 # HTTP client → Unreal Remote Control API
+│   │   ├── client.py                 # HTTP client → Remote Control API + Python execution
 │   │   ├── asset_registry.py         # 27 asset categories + classification engine
 │   │   └── asset_scanner.py          # Filesystem Content/ directory scanner
 │   ├── tools/
 │   │   ├── editor.py                 # ue_ping, ue_get_editor_info
-│   │   └── assets.py                 # list_project_assets, list_asset_categories
+│   │   ├── assets.py                 # list_project_assets, list_asset_categories
+│   │   └── environment.py            # 19 Layer 2 tools (actors/levels/foliage/landscape)
 │   ├── resources/
 │   │   └── engine.py                 # unreal://connection/status, unreal://config
 │   └── prompts/
 │       └── workflows.py              # explore_level, prototype_gameplay
 └── tests/
-    └── test_server.py                # 28 tests covering registry, scanner, tools
+    ├── test_server.py                # 28 tests — Layer 1 registry, scanner, tools
+    └── test_environment.py           # 97 tests — Layer 2 environment tools
 ```
 
 ---
@@ -415,16 +649,16 @@ ue5-mcp/
 ## Development
 
 ```bash
-uv sync --dev
+uv sync --extra dev
 
 # Run tests
-uv run --with pytest --with pytest-asyncio python -m pytest tests/ -v
+uv run python -m pytest tests/ -v
 
 # Debug JSON-RPC with MCP Inspector
 npx @modelcontextprotocol/inspector uv run ue5-mcp
 
 # Lint
-uv run ruff check src/
+uv run ruff check src/ tests/
 ```
 
 **Adding a new tool:**
@@ -445,7 +679,7 @@ Add one `AssetCategory` entry to `bridge/asset_registry.py`. The classification 
 | Layer | Status |
 |-------|--------|
 | Layer 1 · Project Knowledge (`list_project_assets`, 27 categories) | ✅ Complete |
-| Layer 2 · Environment Tools (actors, foliage, levels, landscape) | 🔲 Planned |
+| Layer 2 · Environment Tools (actors, foliage, levels, landscape) | ✅ Complete |
 | Layer 3 · Blueprint Tools (generate, edit, compile) | 🔲 Planned |
 | Layer 4 · Debugging Tools (collision, performance, logs, validation) | 🔲 Planned |
 | Layer 5 · Testing Tools (automation, PIE, headless builds) | 🔲 Planned |

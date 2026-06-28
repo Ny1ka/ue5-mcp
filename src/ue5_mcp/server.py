@@ -6,7 +6,7 @@ from ue5_mcp.bridge.client import UEClient
 from ue5_mcp.config import get_settings
 from ue5_mcp.prompts import register_workflow_prompts
 from ue5_mcp.resources import register_engine_resources
-from ue5_mcp.tools import register_asset_tools, register_editor_tools
+from ue5_mcp.tools import register_asset_tools, register_editor_tools, register_environment_tools
 
 # FastMCP instance — name appears in MCP client UI
 mcp = FastMCP(
@@ -27,6 +27,7 @@ def create_app() -> FastMCP:
 
     register_editor_tools(mcp, client)
     register_asset_tools(mcp, client)
+    register_environment_tools(mcp, client)
     register_engine_resources(mcp, client)
     register_workflow_prompts(mcp)
 
