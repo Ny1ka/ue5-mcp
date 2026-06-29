@@ -42,10 +42,13 @@ from ue5_mcp.config import Settings
 # Asset discovery (Layer 1 — already in use)
 _EDITOR_ASSET_LIB = "/Script/EditorScriptingUtilities.Default__EditorAssetLibrary"
 
-# Actor management — requires EditorScriptingUtilities plugin
-_EDITOR_ACTOR_SUB = "/Script/EditorScriptingUtilities.Default__EditorActorSubsystem"
+# Actor management — lives in UnrealEd (NOT EditorScriptingUtilities).
+# See: https://forums.unrealengine.com/t/how-do-you-get-the-correct-remote-api-object-path-for-a-function/507987
+_EDITOR_ACTOR_SUB = "/Script/UnrealEd.Default__EditorActorSubsystem"
 
-# Level management — requires EditorScriptingUtilities plugin
+# Level management — Blueprint library in EditorScriptingUtilities plugin.
+# Note: GetEditorWorld is deprecated/unavailable remotely in UE 5.x; we derive
+# the world path from actor object paths instead.
 _EDITOR_LEVEL_LIB = "/Script/EditorScriptingUtilities.Default__EditorLevelLibrary"
 
 # Foliage — requires FoliageEdit module
@@ -420,6 +423,40 @@ class UEClient:
                 f"Remote function call failed: {object_path}.{function_name}"
             ) from exc
 
+    @staticmethod
+    def _list_from_remote_result(result: dict[str, Any], *legacy_keys: str) -> list[Any]:
+        """Extract a list return value from a Remote Control function response.
+
+        UE 5.x returns lists under ``ReturnValue``; older docs reference
+        ``OutActorList`` / ``OutAssetList`` style out-parameters.
+        """
+        value = result.get("ReturnValue")
+        if isinstance(value, list):
+            return value
+        for key in legacy_keys:
+            legacy = result.get(key)
+            if isinstance(legacy, list):
+                return legacy
+        return []
+
+    async def _get_all_level_actor_paths(self) -> list[str]:
+        """Return object paths for every actor in the current editor level."""
+        result = await self.call_editor_function(
+            _EDITOR_ACTOR_SUB, "GetAllLevelActors", {}
+        )
+        return self._list_from_remote_result(result, "OutActorList")
+
+    async def _get_editor_world_path(self) -> str:
+        """Derive the editor world object path without deprecated GetEditorWorld.
+
+        Actor paths look like:
+        /Game/Maps/L_TestLevel.L_TestLevel:PersistentLevel.ActorName
+        """
+        for path in await self._get_all_level_actor_paths():
+            if ":PersistentLevel." in path:
+                return path.split(":PersistentLevel.", 1)[0]
+        return ""
+
     # ------------------------------------------------------------------
     # Asset discovery via Remote Control (EditorAssetLibrary)
     # ------------------------------------------------------------------
@@ -456,7 +493,7 @@ class UEClient:
             },
         )
 
-        asset_paths: list[str] = list_result.get("OutAssetList", [])
+        asset_paths: list[str] = self._list_from_remote_result(list_result, "OutAssetList")
         if not asset_paths:
             return {"asset_paths": [], "asset_data": []}
 
@@ -601,10 +638,7 @@ class UEClient:
             }
 
         # Step 1: get all actor object paths.
-        list_result = await self.call_editor_function(
-            _EDITOR_ACTOR_SUB, "GetAllLevelActors", {}
-        )
-        actor_paths: list[str] = list_result.get("OutActorList", [])
+        actor_paths: list[str] = await self._get_all_level_actor_paths()
 
         actors: list[dict[str, Any]] = []
         for path in actor_paths:
@@ -707,7 +741,7 @@ class UEClient:
             }
 
         result = await self.call_editor_function(
-            _EDITOR_LEVEL_LIB,
+            _EDITOR_ACTOR_SUB,
             "SpawnActorFromObject",
             {
                 "ObjectToUse": asset_path,
@@ -1023,20 +1057,13 @@ class UEClient:
                 },
             }
 
-        # Optimise for tag-only search using dedicated subsystem call.
-        if tag and not class_name and not name_pattern:
-            result = await self.call_editor_function(
-                _EDITOR_ACTOR_SUB,
-                "GetAllActorsWithTag",
-                {"Tag": tag},
-            )
-            paths: list[str] = result.get("OutActors", [])
-            actors = [{"name": p.split(".")[-1], "object_path": p} for p in paths]
-            return {"actors": actors, "total": len(actors), "filters": {"tag": tag}}
-
-        # General filter: fetch all actors, filter locally.
+        # Tag search: fetch all actors and filter locally (GetAllActorsWithTag
+        # is not exposed on EditorActorSubsystem via Remote Control in UE 5.x).
         all_data = await self.get_all_actors()
         actors = all_data.get("actors", [])
+
+        if tag:
+            actors = [a for a in actors if tag in a.get("tags", [])]
 
         if class_name:
             if partial_match:
@@ -1111,8 +1138,7 @@ class UEClient:
         Calls GetAllLevelActors and searches for a path whose terminal
         component matches actor_name (case-sensitive).
         """
-        result = await self.call_editor_function(_EDITOR_ACTOR_SUB, "GetAllLevelActors", {})
-        for path in result.get("OutActorList", []):
+        for path in await self._get_all_level_actor_paths():
             if path.split(".")[-1] == actor_name:
                 return path
         return None
@@ -1141,16 +1167,16 @@ class UEClient:
             }
 
         # GetEditorWorld returns the world actor path; derive the package name.
-        world_result = await self.call_editor_function(
-            _EDITOR_LEVEL_LIB, "GetEditorWorld", {}
-        )
-        world_path: str = world_result.get("ReturnValue", "")
+        world_path: str = await self._get_editor_world_path()
 
-        # GetStreamingLevels lists sub-levels registered with the persistent level.
-        streaming_result = await self.call_editor_function(
-            _EDITOR_LEVEL_LIB, "GetStreamingLevels", {}
-        )
-        streaming_levels: list[Any] = streaming_result.get("ReturnValue", [])
+        streaming_levels: list[Any] = []
+        try:
+            streaming_result = await self.call_editor_function(
+                _EDITOR_LEVEL_LIB, "GetStreamingLevels", {}
+            )
+            streaming_levels = self._list_from_remote_result(streaming_result)
+        except UEConnectionError:
+            pass
 
         levels: list[dict[str, Any]] = [
             {
@@ -1206,10 +1232,7 @@ class UEClient:
             }
 
         # Capture current world before loading.
-        world_before = await self.call_editor_function(
-            _EDITOR_LEVEL_LIB, "GetEditorWorld", {}
-        )
-        previous = world_before.get("ReturnValue", "")
+        previous = await self._get_editor_world_path()
 
         result = await self.call_editor_function(
             _EDITOR_LEVEL_LIB,
@@ -1240,10 +1263,7 @@ class UEClient:
             }
 
         # Capture world path for the response.
-        world_result = await self.call_editor_function(
-            _EDITOR_LEVEL_LIB, "GetEditorWorld", {}
-        )
-        level_path: str = world_result.get("ReturnValue", "")
+        level_path: str = await self._get_editor_world_path()
 
         result = await self.call_editor_function(
             _EDITOR_LEVEL_LIB, "SaveCurrentLevel", {}
@@ -1286,14 +1306,11 @@ class UEClient:
                 "success": True,
             }
 
-        # WorldSettings actor path pattern:
-        # /Game/Maps/L_Forest.L_Forest:PersistentLevel.WorldSettings
-        world_result = await self.call_editor_function(
-            _EDITOR_LEVEL_LIB, "GetEditorWorld", {}
-        )
-        world_path: str = world_result.get("ReturnValue", "")
-        world_name = world_path.split("/")[-1] if world_path else "Unknown"
-        ws_path = f"{world_path}.{world_name}:PersistentLevel.WorldSettings"
+        # WorldSettings path: _get_editor_world_path() already returns the full
+        # package+asset segment, e.g. /Game/Maps/L_Forest.L_Forest
+        # so we only append :PersistentLevel.WorldSettings.
+        world_path: str = await self._get_editor_world_path()
+        ws_path = f"{world_path}:PersistentLevel.WorldSettings"
 
         # UE property name mapping from our human-readable keys.
         _PROP_MAP = {

@@ -13,6 +13,11 @@ Claude: → spawn_foliage() → trees placed, collision generated, LODs configur
 
 You:    "My player falls through the floor."
 Claude: Checking collision... capsule... physics... → "Floor mesh collision disabled."
+
+You:    "Design a FPS bomb site map similar to Ascent on Valorant."
+Claude: → translate_style_reference() → plan_environment() → apply_environment_template()
+        → build_structure() × N → scatter_assets() → assign_material() → apply_lighting_preset()
+        → check_sightlines() → run_correction_pass() → generate_build_report()
 ```
 
 ---
@@ -61,12 +66,17 @@ AI (Claude / Cursor)
         ▼
    Unreal MCP
         │
-        ├── Layer 1 · Project Knowledge   ← what exists in the project
-        ├── Layer 2 · Environment Tools   ← place and configure things
-        ├── Layer 3 · Blueprint Tools     ← generate and edit logic
-        ├── Layer 4 · Debugging Tools     ← diagnose and fix problems
-        ├── Layer 5 · Testing Tools       ← automated validation
-        └── Layer 6 · Safety Layer        ← guardrails on everything
+        ├── Layer 1 · Project Knowledge      ← what exists in the project
+        ├── Layer 2 · Environment Tools      ← place and configure things
+        ├── Layer 3 · Blueprint Tools        ← generate and edit logic
+        ├── Layer 4 · Debugging Tools        ← diagnose and fix problems
+        ├── Layer 5 · Testing Tools          ← automated validation
+        ├── Layer 6 · Safety Layer           ← guardrails on everything
+        └── Environment Building System 🔄  ← full level authoring pipeline
+             ├── Core Authoring  (materials, lighting, splines, scattering)
+             ├── Composition     (structures, roads, zone population)
+             └── Intelligence    (planner, templates, reference translation,
+                                  spatial validation, auto-fix, build reports)
 ```
 
 ---
@@ -586,7 +596,11 @@ Cursor / Claude
       │    ├── environment.py  ← Layer 2 · done
       │    ├── blueprints.py   ← Layer 3 · done
       │    ├── debugging.py    ← Layer 4 · done
-      │    └── testing.py      ← Layer 5 · done
+      │    ├── testing.py      ← Layer 5 · done
+      │    ├── materials.py    ← Env System · in development
+      │    ├── lighting.py     ← Env System · in development
+      │    ├── planner.py      ← Env System · in development
+      │    └── validation.py   ← Env System · in development
       │
       ├── resources/      ← read-only context (unreal:// URIs)
       ├── prompts/        ← workflow templates
@@ -628,17 +642,25 @@ ue5-mcp/
 │   ├── tools/
 │   │   ├── editor.py                 # ue_ping, ue_get_editor_info
 │   │   ├── assets.py                 # list_project_assets, list_asset_categories
-│   │   ├── environment.py            # 19 Layer 2 tools (actors/levels/foliage/landscape)
+│   │   ├── environment.py            # 19 Layer 2 tools + splines/roads/scatter (in dev)
 │   │   ├── blueprints.py             # 8 Layer 3 tools (create, variables, events, compile)
 │   │   ├── debugging.py              # 15 Layer 4 tools (collision, perf, logs, validation)
-│   │   └── testing.py                # 12 Layer 5 tools (automation, PIE, headless builds)
+│   │   ├── testing.py                # 12 Layer 5 tools (automation, PIE, headless builds)
+│   │   ├── materials.py              # 🔄 material assign, instances, parameters (in dev)
+│   │   ├── lighting.py               # 🔄 spawn lights, presets, post-process (in dev)
+│   │   ├── planner.py                # 🔄 scene planner, zone state, build plan (in dev)
+│   │   └── validation.py             # 🔄 spatial checks, auto-fix, build reports (in dev)
 │   ├── resources/
 │   │   └── engine.py                 # unreal://connection/status, unreal://config
-│   └── prompts/
-│       └── workflows.py              # explore_level, prototype_gameplay
+│   ├── prompts/
+│   │   └── workflows.py              # explore_level, prototype_gameplay + build workflows (in dev)
+│   └── templates/
+│       ├── environment_profiles.json # 🔄 asset palettes per biome (in dev)
+│       └── structure_templates.json  # 🔄 mesh component lists per structure type (in dev)
 └── tests/
     ├── test_server.py                # Layer 1 registry, scanner, UI endpoints
-    └── test_environment.py           # Layer 2 environment tools (97 tests)
+    ├── test_environment.py           # Layer 2 environment tools (97 tests)
+    └── test_environment_v2.py        # 🔄 Environment Building System tests (in dev)
 ```
 
 ---
@@ -681,7 +703,286 @@ Add one `AssetCategory` entry to `bridge/asset_registry.py`. The classification 
 | Layer 4 · Debugging Tools (collision, performance, logs, validation) | ✅ Complete |
 | Layer 5 · Testing Tools (automation, PIE, headless builds) | ✅ Complete |
 | Layer 6 · Safety Layer (read-only, dry-run, audit log, scope limit) | ✅ Mostly done |
+| **Environment Building System** (materials, lighting, planning, validation, reference translation) | 🔄 **In Development** |
 | C++ bridge plugin (deep Blueprint graph editing) | 🔲 Future |
+
+---
+
+## Environment Building System — *In Development*
+
+> **Build complete, coherent environments from a single natural language prompt.**
+
+```
+You:    "Make me a forest environment with a few wooden structures."
+You:    "Plan out and create a small city with roads, buildings, and cars."
+You:    "Design a FPS bomb site map similar to Ascent on Valorant."
+MCP:    → translate reference → plan zones → build terrain → place structures
+        → assign materials → configure lighting → run validation → report
+```
+
+The goal is a full plan-build-check-fix pipeline. The AI describes *what* it wants; the MCP generates a spatial plan, executes it phase by phase, then self-corrects before declaring the build complete.
+
+### The Three-Layer Build Stack
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Layer C — Intelligence & Orchestration                         │
+│  plan_environment · translate_style_reference                   │
+│  apply_environment_template · build_environment_from_scratch    │
+│  run_correction_pass · generate_build_report                    │
+├─────────────────────────────────────────────────────────────────┤
+│  Layer B — Composition & Coherence                              │
+│  build_structure · create_road_segment · populate_zone          │
+│  scatter_assets · apply_lighting_preset · apply_material_palette│
+├─────────────────────────────────────────────────────────────────┤
+│  Layer A — Core Authoring Tools  ← primary build target         │
+│  assign_material · spawn_light · create_spline_actor            │
+│  add_spline_mesh · configure_post_process · build_navmesh       │
+└─────────────────────────────────────────────────────────────────┘
+              (current 58 tools feed into Layer A)
+```
+
+---
+
+### Week 1 — Core Authoring Toolkit
+
+**Session 1 · Material System** (`tools/materials.py`)
+
+The highest-impact single addition. Without material tools every placed object remains white clay.
+
+| Tool | Description |
+|------|-------------|
+| `assign_material` | Assign a material or instance to an actor's mesh component by slot |
+| `create_material_instance` | Create a Material Instance asset from a parent material |
+| `set_material_parameters` | Set scalar, vector, and texture parameters on a Material Instance |
+| `get_material_slots` | Return all material slot names and current assignments on an actor |
+| `apply_material_palette` | Batch-assign materials across a list of actors in one call |
+
+`apply_material_palette` is the key tool — it lets the AI dress an entire scene in one call rather than one actor at a time.
+
+---
+
+**Session 2 · Lighting System** (`tools/lighting.py`)
+
+Lighting is what separates a forest at dawn from harsh noon light. Every environment preset starts here.
+
+| Tool | Description |
+|------|-------------|
+| `spawn_light` | Spawn a directional, point, spot, rect, or sky light at a world location |
+| `configure_directional_light` | Set sun angle, intensity, color, and shadow distance (primary time-of-day control) |
+| `configure_sky_atmosphere` | Set Rayleigh/Mie scattering and aerial perspective to control sky color palette |
+| `configure_post_process` | Exposure, bloom, color grading (shadows/midtones/highlights), depth of field, vignette |
+| `apply_lighting_preset` | Apply a curated preset: `forest_dawn`, `city_night`, `golden_hour`, `overcast`, `foggy_midday` |
+| `build_lighting` | Trigger a lightmap build via `EditorLevelLibrary` |
+
+`apply_lighting_preset` is the highest-leverage tool — the AI calls one function and gets coherent lighting without configuring 12 individual parameters.
+
+---
+
+**Session 3 · Splines, Roads & Structure Composition** (extend `tools/environment.py`)
+
+The difference between a city and a cluster of buildings is connected roads and assembled structures.
+
+| Tool | Description |
+|------|-------------|
+| `create_spline_actor` | Place a spline actor with an array of control points |
+| `add_spline_mesh` | Tile a mesh asset along a spline (roads, fences, rivers, walls) |
+| `create_road_segment` | Higher-level: start + end + width + material → spline, mesh, and lane markings |
+| `build_structure` | Assemble a structure from component meshes: `cabin`, `warehouse`, `tower`, `wall_segment`, `archway` |
+| `create_zone_boundary` | Place invisible blocking volumes and a named outliner folder for a defined zone |
+
+`build_structure` consumes a `structure_templates.json` config that maps each type to a list of mesh asset paths and their relative offsets — this is what turns "place a wooden cabin" into a real composed object.
+
+---
+
+**Session 4 · Smart Asset Scattering & Zone Population**
+
+Fills spaces convincingly rather than placing assets one at a time.
+
+| Tool | Description |
+|------|-------------|
+| `scatter_assets` | Place any asset list across a zone with density falloff, overlap avoidance, and scale/rotation variance |
+| `populate_zone` | Fill a named zone based on environment type (`forest`, `urban`, `desert`, `indoor`) using curated density parameters |
+| `clear_zone` | Delete all actors within a named zone or set of bounds |
+| `create_asset_cluster` | Place a small thematic group of assets (rocks, street furniture, debris) around an anchor point |
+
+`populate_zone` reads an `environment_profiles.json` config that maps each environment type to curated asset lists and density settings — the knowledge of which assets look good together lives in config, not code.
+
+---
+
+### Week 2 — Environment Intelligence Layer
+
+**Session 5 · The Scene Planner** (`tools/planner.py`)
+
+The most important session. Before this, the AI improvises spatial decisions. After this, it generates a machine-readable plan and executes phase by phase.
+
+| Tool | Description |
+|------|-------------|
+| `plan_environment` | Convert a natural language description into a structured zone map, asset requirements, lighting recommendation, and ordered build phases |
+| `get_build_plan` | Retrieve the current active build plan from server state |
+| `update_build_plan` | Mark phases complete, record what was built, add notes |
+| `get_environment_summary` | Snapshot of everything currently placed: actor counts by type, covered area, material status, lighting state |
+
+`plan_environment` output schema:
+
+```json
+{
+  "zones": [
+    { "name": "forest_core", "purpose": "dense canopy", "bounds": {...}, "environment_type": "forest", "density": 0.9, "priority": 1 }
+  ],
+  "asset_requirements": ["SM_Tree_Oak", "SM_Fern", "SM_Log"],
+  "lighting_recommendation": { "preset": "forest_dawn", "overrides": {} },
+  "build_order": ["terrain", "structures", "scatter_vegetation", "foliage", "lighting", "validation"]
+}
+```
+
+The rule: **always `plan_environment` first, then execute phase by phase, then validate**. This is the loop that makes complex environments spatially coherent.
+
+---
+
+**Session 6 · Environment Templates & Spatial Grammar**
+
+Templates encode the spatial rules that make an environment *feel* like what it's supposed to be.
+
+| Tool | Description |
+|------|-------------|
+| `list_environment_templates` | Return all available templates with descriptions and recommended map sizes |
+| `apply_environment_template` | Expand a named template into a full zone plan and begin build phases |
+
+Built-in templates: `dense_forest` · `sparse_woodland` · `city_block` · `city_district` · `fps_bombsite` · `fps_mid_area` · `abandoned_industrial` · `coastal_village`
+
+A `fps_bombsite` template encodes: outer approach corridor (~30 m), main site area (~20×25 m with 2+ large cover objects), box room flank, rotate path, and maximum sightline distance. These spatial rules are what distinguish a combat map from a random collection of boxes.
+
+---
+
+**Session 7 · Reference Translation System**
+
+Converts any style reference — a game map, an architectural movement, a movie scene, a real place — into a structured design profile.
+
+| Tool | Description |
+|------|-------------|
+| `translate_style_reference` | Convert a reference string into a structured style profile: color palette, material keywords, spatial characteristics, lighting profile |
+| `search_assets_by_style` | Match a style profile against the asset library to find the best-fitting meshes and materials |
+
+Style profile output schema:
+
+```json
+{
+  "color_palette": { "dominant": "#8B7355", "accent": "#2E4A1E", "shadow": "#1A1A2E" },
+  "material_keywords": ["weathered wood", "stone cobble", "terracotta roof"],
+  "spatial_characteristics": { "density": 0.7, "verticality": 0.4, "sightline_profile": "short" },
+  "lighting_profile": { "preset": "golden_hour", "overrides": { "sky_tint": "#FFD59E" } },
+  "reference_notes": "Compact Mediterranean layout, asymmetric sight lines, mixed-height buildings"
+}
+```
+
+The output feeds directly into `plan_environment`. The implementation is a structured prompt template — engineered to extract the same schema from any reference regardless of source.
+
+---
+
+**Session 8 · Orchestration Prompts & Build Workflows**
+
+Wire the full pipeline into named workflows the AI follows without step-by-step prompting.
+
+New entries in `prompts/workflows.py`:
+
+| Prompt | Workflow |
+|--------|---------|
+| `build_environment_from_scratch` | translate reference → plan zones → setup lighting → build terrain → place structures → populate → assign materials → validate → report |
+| `build_fps_map` | layout playspace → place cover → check sightlines → material pass → lighting → navmesh |
+| `iterate_on_environment` | get summary → identify gaps → targeted additions → re-validate |
+| `dress_environment` | material pass + lighting pass on an already-placed scene |
+
+These prompts are the scripts the AI reads to know exactly which tool calls to make and in what order. Without them, it improvises. With them, it follows a proven process every time.
+
+---
+
+### Week 3 — Self-Checking, Coherence & Visual Validation
+
+**Session 9 · Spatial Validation System** (`tools/validation.py`)
+
+How the MCP checks its own work. Catches floating objects, overlapping structures, bare materials, and broken sightlines before the build is declared done.
+
+| Tool | Description |
+|------|-------------|
+| `check_floating_actors` | Find static mesh actors whose bounding box bottom is above terrain by more than a threshold |
+| `check_actor_overlaps` | Find pairs of actors whose bounding boxes intersect (excludes intentional overlaps) |
+| `check_zone_coverage` | Measure what percentage of each planned zone has been populated — detects zones that were planned but never filled |
+| `check_material_coverage` | Scan all visible static meshes and flag any with a default or missing material |
+| `check_sightlines` | For FPS maps: report sightline distances from common player positions, flag angles exceeding `max_sightline_meters` |
+| `validate_environment` | Master tool — runs all checks above and returns a structured report of `issues`, `warnings`, and `passed_checks` |
+
+---
+
+**Session 10 · Auto-Fix & Iterative Correction**
+
+Validation without correction is diagnosis. These tools close the loop.
+
+| Tool | Description |
+|------|-------------|
+| `snap_actors_to_ground` | Trace a ray downward from each actor and move it to the surface hit point |
+| `resolve_actor_overlaps` | Move lower-priority actors to the nearest non-overlapping position |
+| `fill_empty_zones` | Check zone coverage and call `populate_zone` to fill sparse areas |
+| `apply_missing_materials` | Look up each bare actor's type, find the best-match material from the environment profile, and assign it |
+| `run_correction_pass` | Run `validate_environment` → auto-apply all fixable issues → re-validate → report what remains |
+
+Every build workflow ends with `run_correction_pass`. The MCP never declares a build complete without it.
+
+---
+
+**Session 11 · Screenshot Capture & Build Report**
+
+The "eyes" of the self-check system — lets the AI see what it has built.
+
+| Tool | Description |
+|------|-------------|
+| `capture_editor_screenshot` | Capture the current viewport via `AutomationLibrary.take_high_res_screenshot` and return the file path |
+| `get_viewport_overview` | Position the editor camera top-down over the scene and capture a full overview screenshot |
+| `generate_build_report` | Compile zone coverage stats, actor counts, material coverage %, lighting status, validation results, and viewport screenshots into a markdown report |
+| `compare_to_reference` | Score the current environment against a style profile across density, verticality, material palette, and sightline dimensions — return a diff and suggested adjustments |
+
+---
+
+**Session 12 · Integration, Safety & Environment Gallery**
+
+| Addition | Description |
+|----------|-------------|
+| Three end-to-end test builds | `build_forest_with_structures`, `build_small_city`, `build_fps_bombsite` — full plan-to-report pipelines |
+| `undo_last_build_phase` | Read the audit log and reverse all actor spawns from the most recent phase — the safety net when a phase goes wrong |
+| `environment_gallery` resource | New `unreal://environments/gallery` resource listing previously built environments with their plans and screenshot paths |
+| `tests/test_environment_v2.py` | Full pytest coverage for all new tools |
+
+---
+
+### New Files Added by This System
+
+```
+src/ue5_mcp/
+├── tools/
+│   ├── materials.py          ← Session 1 · material assign/create/parameter tools
+│   ├── lighting.py           ← Session 2 · spawn lights, presets, post-process
+│   ├── planner.py            ← Session 5 · scene planner, zone definitions, build state
+│   └── validation.py         ← Session 9 · spatial checks and auto-fix tools
+├── templates/
+│   ├── environment_profiles.json   ← asset palettes per biome (forest, urban, etc.)
+│   └── structure_templates.json    ← mesh component lists per structure type
+└── tests/
+    └── test_environment_v2.py      ← coverage for all new tools
+```
+
+`environment.py` is extended with spline, road, scatter, and zone population tools. `prompts/workflows.py` is extended with the four new build workflows.
+
+---
+
+### Design Principles
+
+**The plan always comes before the build.** `plan_environment` generates a machine-readable zone map before any actor is spawned. Every workflow prompt enforces this.
+
+**Every build phase is logged.** Each `spawn_actor` call records the plan phase it belongs to in the audit log. This is what enables `undo_last_build_phase`.
+
+**Curated config files are as important as the tools.** `environment_profiles.json` and `structure_templates.json` encode which assets look good together, which densities feel natural, and which lighting settings match each biome. This curation is the difference between "technically built" and "actually looks good."
+
+**Self-check is non-negotiable.** Every workflow prompt ends with `run_correction_pass` and `generate_build_report`. The MCP never considers a build complete without running both.
 
 ---
 

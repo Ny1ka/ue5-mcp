@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "ue5-mcp": {
+      "command": "C:\\Users\\nwach\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+      "args": ["-m", "ue5_mcp.server"],
+      "cwd": "C:\\Users\\nwach\\Downloads\\ue5-mcp",
+      "env": {
+        "UE_HOST": "127.0.0.1",
+        "UE_HTTP_PORT": "30010",
+        "UE_MOCK_MODE": "false",
+        "UE_PROJECT_PATH": "C:/Users/nwach/OneDrive/Pictures/Documents/Unreal Projects/mcpfpstest/mcpfpstest.uproject",
+        "UE_SCOPE_PATH": "/Game/MCP_Test"
+      }
+    }
+  }
+}
