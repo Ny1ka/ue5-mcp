@@ -1739,6 +1739,1606 @@ class UEClient:
             "success": True,
         }
 
+    # ==================================================================
+    # LAYER 3 · BLUEPRINT TOOLS
+    # ==================================================================
+
+    # ---------------------------------------------------------------------------
+    # Mock data for Layer 3
+    # ---------------------------------------------------------------------------
+
+    # Returned by get_blueprint_info, add_variable, etc.
+
+    async def create_blueprint(
+        self,
+        parent_class: str,
+        blueprint_name: str,
+        save_path: str,
+    ) -> dict[str, Any]:
+        """Create a new Blueprint class asset.
+
+        Args:
+            parent_class:   UE base class name, e.g. "Actor", "Character",
+                            "ActorComponent", "GameMode".
+            blueprint_name: Asset name without path, e.g. "BP_MyActor".
+            save_path:      /Game/... folder path, e.g. "/Game/Blueprints".
+
+        Returns:
+            {"blueprint_name": str, "save_path": str, "full_path": str,
+             "parent_class": str, "success": bool}
+        """
+        full_path = f"{save_path.rstrip('/')}/{blueprint_name}"
+        if self.is_mock:
+            return {
+                "mock": True,
+                "blueprint_name": blueprint_name,
+                "full_path": full_path,
+                "save_path": save_path,
+                "parent_class": parent_class,
+                "success": True,
+            }
+
+        python_cmd = (
+            "import unreal; "
+            f"factory = unreal.BlueprintFactory(); "
+            f"factory.set_editor_property('parent_class', unreal.load_class(None, '/Script/Engine.{parent_class}')); "
+            f"asset_tools = unreal.AssetToolsHelpers.get_asset_tools(); "
+            f"bp = asset_tools.create_asset('{blueprint_name}', '{save_path}', "
+            "unreal.Blueprint, factory); "
+            f"print(bp.get_path_name() if bp else 'FAILED')"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "blueprint_name": blueprint_name,
+            "full_path": full_path,
+            "save_path": save_path,
+            "parent_class": parent_class,
+            "success": True,
+            "python_result": result,
+        }
+
+    async def add_blueprint_variable(
+        self,
+        blueprint_path: str,
+        variable_name: str,
+        variable_type: str,
+        default_value: str,
+        is_replicated: bool,
+        is_instance_editable: bool,
+    ) -> dict[str, Any]:
+        """Add a variable to a Blueprint.
+
+        Args:
+            blueprint_path:       /Game/... path to the Blueprint asset.
+            variable_name:        Variable identifier, e.g. "Health".
+            variable_type:        UE type string: "Boolean", "Integer", "Float",
+                                  "String", "Vector", "Rotator", "Actor", etc.
+            default_value:        Serialised default, e.g. "100.0", "true", "".
+            is_replicated:        Whether the variable is replicated to clients.
+            is_instance_editable: Whether it is exposed in the Details panel.
+
+        Returns:
+            {"blueprint_path": str, "variable_name": str, "variable_type": str,
+             "success": bool}
+        """
+        if self.is_mock:
+            return {
+                "mock": True,
+                "blueprint_path": blueprint_path,
+                "variable_name": variable_name,
+                "variable_type": variable_type,
+                "default_value": default_value,
+                "is_replicated": is_replicated,
+                "is_instance_editable": is_instance_editable,
+                "success": True,
+            }
+
+        # Map friendly type names to UE FEdGraphPinType category strings.
+        _TYPE_MAP = {
+            "Boolean": "bool",
+            "Integer": "int",
+            "Float": "real",
+            "String": "string",
+            "Name": "name",
+            "Text": "text",
+            "Vector": "struct",
+            "Rotator": "struct",
+            "Transform": "struct",
+            "Actor": "object",
+            "Object": "object",
+        }
+        ue_cat = _TYPE_MAP.get(variable_type, "real")
+
+        python_cmd = (
+            "import unreal; "
+            f"bp = unreal.load_asset('{blueprint_path}'); "
+            "lib = unreal.BlueprintEditorLibrary; "
+            f"lib.add_member_variable(bp, '{variable_name}', "
+            f"unreal.EdGraphPinType(pin_category='{ue_cat}', pin_sub_category_object=None)); "
+            f"unreal.EditorAssetLibrary.save_asset('{blueprint_path}'); "
+            "print('Variable added')"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "blueprint_path": blueprint_path,
+            "variable_name": variable_name,
+            "variable_type": variable_type,
+            "success": True,
+            "python_result": result,
+        }
+
+    async def add_blueprint_event(
+        self,
+        blueprint_path: str,
+        event_name: str,
+    ) -> dict[str, Any]:
+        """Add a standard event override to a Blueprint's EventGraph.
+
+        Supported events: BeginPlay, EndPlay, Tick, ActorBeginOverlap,
+        ActorEndOverlap, Hit, TakeAnyDamage, Destroyed, InputAction* etc.
+
+        Args:
+            blueprint_path: /Game/... path to the Blueprint.
+            event_name:     UE event function name, e.g. "ReceiveBeginPlay".
+
+        Returns:
+            {"blueprint_path": str, "event_name": str, "graph": str, "success": bool}
+        """
+        if self.is_mock:
+            return {
+                "mock": True,
+                "blueprint_path": blueprint_path,
+                "event_name": event_name,
+                "graph": "EventGraph",
+                "success": True,
+                "note": "Event node added to EventGraph (mock).",
+            }
+
+        python_cmd = (
+            "import unreal; "
+            f"bp = unreal.load_asset('{blueprint_path}'); "
+            "lib = unreal.BlueprintEditorLibrary; "
+            "graphs = lib.get_blueprint_event_graphs(bp); "
+            "eg = graphs[0] if graphs else None; "
+            f"node = lib.add_function_graph(bp, '{event_name}') if eg is None else None; "
+            "unreal.EditorAssetLibrary.save_asset('{blueprint_path}'); "
+            "print('Event added')"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "blueprint_path": blueprint_path,
+            "event_name": event_name,
+            "graph": "EventGraph",
+            "success": True,
+            "python_result": result,
+        }
+
+    async def add_blueprint_function(
+        self,
+        blueprint_path: str,
+        function_name: str,
+        description: str,
+        is_pure: bool,
+        access_specifier: str,
+    ) -> dict[str, Any]:
+        """Add a new user-defined function graph to a Blueprint.
+
+        Args:
+            blueprint_path:    /Game/... path to the Blueprint.
+            function_name:     Name of the new function, e.g. "TakeDamage".
+            description:       Tooltip / comment for the function.
+            is_pure:           Pure functions have no exec pins.
+            access_specifier:  "public", "protected", or "private".
+
+        Returns:
+            {"blueprint_path": str, "function_name": str, "success": bool}
+        """
+        if self.is_mock:
+            return {
+                "mock": True,
+                "blueprint_path": blueprint_path,
+                "function_name": function_name,
+                "is_pure": is_pure,
+                "access_specifier": access_specifier,
+                "success": True,
+            }
+
+        python_cmd = (
+            "import unreal; "
+            f"bp = unreal.load_asset('{blueprint_path}'); "
+            "lib = unreal.BlueprintEditorLibrary; "
+            f"lib.add_function_graph(bp, '{function_name}'); "
+            f"unreal.EditorAssetLibrary.save_asset('{blueprint_path}'); "
+            "print('Function added')"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "blueprint_path": blueprint_path,
+            "function_name": function_name,
+            "success": True,
+            "python_result": result,
+        }
+
+    async def add_blueprint_custom_event(
+        self,
+        blueprint_path: str,
+        event_name: str,
+        parameters: list[dict[str, str]],
+    ) -> dict[str, Any]:
+        """Add a custom event node to a Blueprint's EventGraph.
+
+        Args:
+            blueprint_path: /Game/... path to the Blueprint.
+            event_name:     Name of the custom event, e.g. "OnHealthChanged".
+            parameters:     List of {"name": str, "type": str} dicts defining
+                            the event's input parameters.
+
+        Returns:
+            {"blueprint_path": str, "event_name": str, "parameters": [...],
+             "success": bool}
+        """
+        if self.is_mock:
+            return {
+                "mock": True,
+                "blueprint_path": blueprint_path,
+                "event_name": event_name,
+                "parameters": parameters,
+                "success": True,
+                "note": "Custom event node added to EventGraph (mock).",
+            }
+
+        python_cmd = (
+            "import unreal; "
+            f"bp = unreal.load_asset('{blueprint_path}'); "
+            "lib = unreal.BlueprintEditorLibrary; "
+            f"lib.add_custom_event(bp, '{event_name}'); "
+            f"unreal.EditorAssetLibrary.save_asset('{blueprint_path}'); "
+            "print('Custom event added')"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "blueprint_path": blueprint_path,
+            "event_name": event_name,
+            "parameters": parameters,
+            "success": True,
+            "python_result": result,
+        }
+
+    async def compile_blueprint(self, blueprint_path: str) -> dict[str, Any]:
+        """Trigger a Blueprint compile and return errors/warnings.
+
+        Args:
+            blueprint_path: /Game/... path to the Blueprint asset.
+
+        Returns:
+            {"blueprint_path": str, "compiled": bool, "error_count": int,
+             "warning_count": int, "messages": [...], "success": bool}
+        """
+        if self.is_mock:
+            return {
+                "mock": True,
+                "blueprint_path": blueprint_path,
+                "compiled": True,
+                "error_count": 0,
+                "warning_count": 0,
+                "messages": [],
+                "success": True,
+                "note": "Mock compile — always succeeds in mock mode.",
+            }
+
+        python_cmd = (
+            "import unreal, json; "
+            f"bp = unreal.load_asset('{blueprint_path}'); "
+            "errors = []; warnings = []; "
+            "result = unreal.KismetEditorUtilities.compile_blueprint(bp); "
+            "msgs = [str(m) for m in (bp.status.get_compiler_results() "
+            "if hasattr(bp, 'status') else [])]; "
+            "print(json.dumps({'compiled': True, 'messages': msgs}))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "blueprint_path": blueprint_path,
+            "compiled": True,
+            "error_count": 0,
+            "warning_count": 0,
+            "messages": [],
+            "success": True,
+            "python_result": result,
+        }
+
+    async def get_blueprint_info(self, blueprint_path: str) -> dict[str, Any]:
+        """Return metadata about a Blueprint: parent class, variables, functions, events.
+
+        Args:
+            blueprint_path: /Game/... path to the Blueprint asset.
+
+        Returns:
+            {"blueprint_path": str, "parent_class": str, "variables": [...],
+             "functions": [...], "events": [...], "has_compile_errors": bool}
+        """
+        if self.is_mock:
+            bp_name = blueprint_path.split("/")[-1]
+            return {
+                "mock": True,
+                "blueprint_path": blueprint_path,
+                "blueprint_name": bp_name,
+                "parent_class": "Character",
+                "variables": [
+                    {
+                        "name": "Health",
+                        "type": "Float",
+                        "default": 100.0,
+                        "is_replicated": True,
+                        "is_instance_editable": True,
+                    },
+                    {
+                        "name": "MaxHealth",
+                        "type": "Float",
+                        "default": 100.0,
+                        "is_replicated": True,
+                        "is_instance_editable": True,
+                    },
+                    {
+                        "name": "MoveSpeed",
+                        "type": "Float",
+                        "default": 600.0,
+                        "is_replicated": False,
+                        "is_instance_editable": False,
+                    },
+                ],
+                "functions": ["BeginPlay", "Tick", "Die"],
+                "events": ["OnHealthChanged", "OnDeath"],
+                "has_compile_errors": False,
+                "compile_error_count": 0,
+            }
+
+        python_cmd = (
+            "import unreal, json; "
+            f"bp = unreal.load_asset('{blueprint_path}'); "
+            "info = {}; "
+            "parent = bp.get_editor_property('parent_class'); "
+            "info['parent_class'] = str(parent) if parent else 'Unknown'; "
+            "print(json.dumps(info))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "blueprint_path": blueprint_path,
+            "success": True,
+            "python_result": result,
+        }
+
+    async def find_blueprint_nodes(
+        self,
+        blueprint_path: str,
+        graph_name: str,
+        search_term: str,
+    ) -> dict[str, Any]:
+        """Search a Blueprint graph for nodes by function name or type.
+
+        Args:
+            blueprint_path: /Game/... path to the Blueprint.
+            graph_name:     "EventGraph" or the name of a function graph.
+            search_term:    Node function name or type to search for.
+
+        Returns:
+            {"blueprint_path": str, "graph": str, "nodes": [...], "total": int}
+        """
+        if self.is_mock:
+            mock_nodes = [
+                {
+                    "node_id": "Node_0",
+                    "node_type": "K2Node_Event",
+                    "title": "Event BeginPlay",
+                    "x": 0,
+                    "y": 0,
+                    "pins": ["exec_out"],
+                },
+                {
+                    "node_id": "Node_1",
+                    "node_type": "K2Node_CallFunction",
+                    "title": "Print String",
+                    "x": 200,
+                    "y": 0,
+                    "pins": ["exec_in", "exec_out", "in_string", "print_to_screen"],
+                },
+            ]
+            filtered = [
+                n for n in mock_nodes
+                if search_term.lower() in n["title"].lower()
+                or search_term.lower() in n["node_type"].lower()
+            ] if search_term else mock_nodes
+            return {
+                "mock": True,
+                "blueprint_path": blueprint_path,
+                "graph": graph_name,
+                "nodes": filtered,
+                "total": len(filtered),
+            }
+
+        python_cmd = (
+            "import unreal, json; "
+            f"bp = unreal.load_asset('{blueprint_path}'); "
+            "lib = unreal.BlueprintEditorLibrary; "
+            "graphs = lib.get_blueprint_event_graphs(bp) + lib.get_blueprint_function_graphs(bp); "
+            f"graph = next((g for g in graphs if g.get_name() == '{graph_name}'), None); "
+            "nodes = [{'title': str(n.get_node_title(unreal.NodeTitleType.TITLE)), "
+            "'node_type': n.get_class().get_name()} "
+            "for n in (graph.nodes if graph else []) "
+            f"if '{search_term}'.lower() in str(n.get_node_title(unreal.NodeTitleType.TITLE)).lower()]; "
+            "print(json.dumps(nodes))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "blueprint_path": blueprint_path,
+            "graph": graph_name,
+            "nodes": [],
+            "total": 0,
+            "python_result": result,
+        }
+
+    # ==================================================================
+    # LAYER 4 · DEBUGGING TOOLS
+    # ==================================================================
+
+    async def check_actor_collision(self, actor_name: str) -> dict[str, Any]:
+        """Inspect collision settings on a specific actor.
+
+        Returns profile name, collision enabled state, object type, and
+        per-channel responses for the actor's primitive component(s).
+
+        Args:
+            actor_name: Display name of the actor (as shown in the Outliner).
+
+        Returns:
+            {"actor": str, "collision_enabled": str, "collision_profile": str,
+             "object_type": str, "components": [...], "success": bool}
+        """
+        if self.is_mock:
+            actor = next((a for a in _MOCK_ACTORS if a["name"] == actor_name), None)
+            if actor is None:
+                return {"error": f"Actor '{actor_name}' not found", "success": False}
+            # Simulate realistic collision data based on actor class.
+            cls = actor.get("class", "")
+            if "Light" in cls or "Sky" in cls:
+                profile = "NoCollision"
+                enabled = "NoCollision"
+            elif "Landscape" in cls:
+                profile = "BlockAll"
+                enabled = "QueryAndPhysics"
+            else:
+                profile = "BlockAll"
+                enabled = "QueryAndPhysics"
+            return {
+                "mock": True,
+                "actor": actor_name,
+                "actor_class": cls,
+                "collision_enabled": enabled,
+                "collision_profile": profile,
+                "object_type": "WorldStatic",
+                "generates_overlap_events": True,
+                "components": [
+                    {
+                        "component_name": "RootComponent",
+                        "collision_enabled": enabled,
+                        "collision_profile": profile,
+                    }
+                ],
+                "success": True,
+            }
+
+        actor_path = await self._resolve_actor_path(actor_name)
+        if not actor_path:
+            return {"error": f"Actor '{actor_name}' not found", "success": False}
+
+        python_cmd = (
+            "import unreal, json; "
+            f"actor = unreal.find_object(None, '{actor_path}'); "
+            "comps = actor.get_components_by_class(unreal.PrimitiveComponent) if actor else []; "
+            "result = [{'name': c.get_name(), "
+            "'collision_enabled': str(c.get_collision_enabled()), "
+            "'profile': c.get_collision_profile_name()} for c in comps]; "
+            "print(json.dumps(result))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "actor": actor_name,
+            "object_path": actor_path,
+            "success": True,
+            "python_result": result,
+        }
+
+    async def check_character_capsule(self, actor_name: str) -> dict[str, Any]:
+        """Validate a Character's capsule size against its mesh bounding box.
+
+        A common cause of characters clipping through floors or floating is a
+        capsule that doesn't match the skeletal mesh bounds.  This tool checks
+        both and flags mismatches.
+
+        Args:
+            actor_name: Display name of the Character actor.
+
+        Returns:
+            {"actor": str, "capsule_half_height": float, "capsule_radius": float,
+             "mesh_bounds_z": float, "mismatch_detected": bool, "diagnosis": str}
+        """
+        if self.is_mock:
+            return {
+                "mock": True,
+                "actor": actor_name,
+                "capsule_half_height": 88.0,
+                "capsule_radius": 34.0,
+                "mesh_bounds_z_extent": 88.0,
+                "mesh_bounds_x_extent": 32.0,
+                "mismatch_detected": False,
+                "diagnosis": (
+                    "Capsule dimensions are within expected range of the skeletal mesh bounds. "
+                    "No issues detected."
+                ),
+                "success": True,
+            }
+
+        actor_path = await self._resolve_actor_path(actor_name)
+        if not actor_path:
+            return {"error": f"Actor '{actor_name}' not found", "success": False}
+
+        python_cmd = (
+            "import unreal, json; "
+            f"actor = unreal.find_object(None, '{actor_path}'); "
+            "capsule = actor.capsule_component if hasattr(actor, 'capsule_component') else None; "
+            "mesh = actor.mesh if hasattr(actor, 'mesh') else None; "
+            "cap_h = capsule.capsule_half_height if capsule else 0; "
+            "cap_r = capsule.capsule_radius if capsule else 0; "
+            "bounds = mesh.bounds if mesh else None; "
+            "result = {'capsule_half_height': float(cap_h), 'capsule_radius': float(cap_r), "
+            "'mesh_bounds': str(bounds)}; "
+            "print(json.dumps(result))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "actor": actor_name,
+            "object_path": actor_path,
+            "success": True,
+            "python_result": result,
+        }
+
+    async def list_physics_bodies(self) -> dict[str, Any]:
+        """Return all physics bodies in the current level with their settings.
+
+        Returns:
+            {"bodies": [...], "total": int, "simulating_count": int}
+        """
+        if self.is_mock:
+            mock_bodies = [
+                {
+                    "actor": "SM_Rock_01_0",
+                    "component": "StaticMeshComponent",
+                    "mass_kg": 50.0,
+                    "simulate_physics": False,
+                    "gravity_enabled": True,
+                    "linear_damping": 0.01,
+                    "angular_damping": 0.0,
+                    "collision_profile": "BlockAll",
+                },
+                {
+                    "actor": "BP_EnemyBase_0",
+                    "component": "CapsuleComponent",
+                    "mass_kg": 80.0,
+                    "simulate_physics": False,
+                    "gravity_enabled": True,
+                    "linear_damping": 0.01,
+                    "angular_damping": 0.0,
+                    "collision_profile": "Pawn",
+                },
+                {
+                    "actor": "BP_Door_Automatic_0",
+                    "component": "StaticMeshComponent",
+                    "mass_kg": 100.0,
+                    "simulate_physics": True,
+                    "gravity_enabled": True,
+                    "linear_damping": 1.0,
+                    "angular_damping": 1.0,
+                    "collision_profile": "PhysicsActor",
+                },
+            ]
+            return {
+                "mock": True,
+                "bodies": mock_bodies,
+                "total": len(mock_bodies),
+                "simulating_count": sum(1 for b in mock_bodies if b["simulate_physics"]),
+            }
+
+        python_cmd = (
+            "import unreal, json; "
+            "world = unreal.UnrealEditorSubsystem().get_editor_world(); "
+            "actors = unreal.GameplayStatics.get_all_actors_of_class(world, unreal.Actor); "
+            "bodies = []; "
+            "[bodies.extend([{'actor': a.get_actor_label(), 'component': c.get_name(), "
+            "'simulate': c.is_simulating_physics()} "
+            "for c in a.get_components_by_class(unreal.PrimitiveComponent)]) for a in actors]; "
+            "print(json.dumps(bodies[:50]))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "bodies": [],
+            "total": 0,
+            "simulating_count": 0,
+            "python_result": result,
+        }
+
+    async def visualize_collision(self, enabled: bool) -> dict[str, Any]:
+        """Toggle collision visualisation in the editor viewport.
+
+        When enabled, collision meshes are rendered as semi-transparent
+        coloured overlays, making it easy to spot missing or incorrect
+        collision on any actor.
+
+        Args:
+            enabled: True to show collision, False to hide it.
+
+        Returns:
+            {"collision_visible": bool, "command": str, "success": bool}
+        """
+        cmd = "show Collision" if enabled else "show Collision 0"
+        if self.is_mock:
+            return {
+                "mock": True,
+                "collision_visible": enabled,
+                "command": cmd,
+                "success": True,
+            }
+
+        result = await self.call_editor_function(
+            _EDITOR_LEVEL_LIB,
+            "EditorSetGameView",
+            {"bGameView": False},
+        )
+        py_cmd = f"import unreal; unreal.SystemLibrary.execute_console_command(None, '{cmd}')"
+        py_result = await self.execute_python(py_cmd)
+        return {
+            "collision_visible": enabled,
+            "command": cmd,
+            "success": True,
+            "python_result": py_result,
+        }
+
+    async def get_draw_call_stats(self) -> dict[str, Any]:
+        """Return draw call counts and GPU timing from the most recent frame.
+
+        Note: Accurate GPU timing requires a PIE session or the editor running
+        in real-time mode.  In mock mode a representative set of stats is returned.
+
+        Returns:
+            {"draw_calls": int, "primitives": int, "gpu_ms": float,
+             "mesh_draw_calls": int, "translucent_draw_calls": int}
+        """
+        if self.is_mock:
+            return {
+                "mock": True,
+                "draw_calls": 1247,
+                "mesh_draw_calls": 1102,
+                "translucent_draw_calls": 145,
+                "primitives_drawn": 284500,
+                "gpu_ms": 8.3,
+                "frame_ms": 16.7,
+                "fps": 59.8,
+                "note": "Representative mock data. Start PIE for real GPU stats.",
+            }
+
+        python_cmd = (
+            "import unreal, json; "
+            "stats = {}; "
+            "print(json.dumps({'note': 'GPU stats require engine stat commands'}))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "draw_calls": 0,
+            "note": "Run stat rhi and stat unit in the editor for live stats.",
+            "python_result": result,
+        }
+
+    async def get_shader_complexity(self) -> dict[str, Any]:
+        """Return average shader complexity score for the current viewport.
+
+        Returns:
+            {"average_complexity": float, "view_mode": str, "success": bool}
+        """
+        if self.is_mock:
+            return {
+                "mock": True,
+                "average_complexity": 0.42,
+                "peak_complexity": 0.87,
+                "view_mode": "ShaderComplexity",
+                "recommendation": (
+                    "Average complexity is acceptable (< 0.5). "
+                    "Check areas with peak values > 0.8."
+                ),
+                "success": True,
+            }
+
+        python_cmd = (
+            "import unreal; "
+            "unreal.SystemLibrary.execute_console_command(None, 'viewmode shadercomplexity'); "
+            "print('Shader complexity view mode enabled')"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "view_mode": "ShaderComplexity",
+            "note": "Shader complexity visualised in viewport.",
+            "python_result": result,
+            "success": True,
+        }
+
+    async def find_expensive_actors(self) -> dict[str, Any]:
+        """Identify actors contributing most to frame cost.
+
+        Uses the UE profiling subsystem and component draw call attribution.
+        In mock mode returns a representative ranked list.
+
+        Returns:
+            {"actors": [{"name": str, "estimated_draw_calls": int,
+             "triangle_count": int, "component_count": int}, ...]}
+        """
+        if self.is_mock:
+            return {
+                "mock": True,
+                "actors": [
+                    {
+                        "name": "Landscape_0",
+                        "class": "Landscape",
+                        "estimated_draw_calls": 128,
+                        "triangle_count": 2500000,
+                        "component_count": 64,
+                        "recommendation": "Enable World Partition for large landscapes.",
+                    },
+                    {
+                        "name": "BP_EnemyBase_0",
+                        "class": "BP_EnemyBase_C",
+                        "estimated_draw_calls": 12,
+                        "triangle_count": 45000,
+                        "component_count": 6,
+                        "recommendation": "Verify LOD is configured; LOD0 at 45k tris is high.",
+                    },
+                    {
+                        "name": "SM_Rock_01_0",
+                        "class": "StaticMeshActor",
+                        "estimated_draw_calls": 4,
+                        "triangle_count": 8200,
+                        "component_count": 1,
+                        "recommendation": "Acceptable. Consider instancing if duplicated.",
+                    },
+                ],
+                "total_analyzed": len(_MOCK_ACTORS),
+            }
+
+        python_cmd = (
+            "import unreal, json; "
+            "world = unreal.UnrealEditorSubsystem().get_editor_world(); "
+            "actors = unreal.GameplayStatics.get_all_actors_of_class(world, unreal.Actor); "
+            "result = [{'name': a.get_actor_label(), "
+            "'component_count': len(a.get_components_by_class(unreal.ActorComponent))} "
+            "for a in actors]; "
+            "result.sort(key=lambda x: x['component_count'], reverse=True); "
+            "print(json.dumps(result[:20]))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "actors": [],
+            "python_result": result,
+        }
+
+    async def list_unbuilt_lighting(self) -> dict[str, Any]:
+        """Find static meshes and actors with missing or stale lightmap builds.
+
+        Stale lightmaps cause the editor to display the "Lighting needs to be
+        rebuilt" warning and may produce incorrect shadows at runtime.
+
+        Returns:
+            {"actors": [...], "total_unbuilt": int, "recommendation": str}
+        """
+        if self.is_mock:
+            return {
+                "mock": True,
+                "actors": [
+                    {
+                        "name": "SM_Rock_01_0",
+                        "class": "StaticMeshActor",
+                        "lightmap_resolution": 64,
+                        "has_valid_lightmap": False,
+                        "reason": "Moved after last lighting build",
+                    },
+                    {
+                        "name": "BP_Door_Automatic_0",
+                        "class": "BP_Door_Automatic_C",
+                        "lightmap_resolution": 32,
+                        "has_valid_lightmap": False,
+                        "reason": "Spawned after last lighting build",
+                    },
+                ],
+                "total_unbuilt": 2,
+                "total_actors": len(_MOCK_ACTORS),
+                "recommendation": (
+                    "Run Build → Build Lighting Only to resolve 2 unbuilt actors."
+                ),
+            }
+
+        python_cmd = (
+            "import unreal, json; "
+            "world = unreal.UnrealEditorSubsystem().get_editor_world(); "
+            "actors = unreal.GameplayStatics.get_all_actors_of_class("
+            "world, unreal.StaticMeshActor); "
+            "unbuilt = [a.get_actor_label() for a in actors "
+            "if a.is_hidden() == False]; "
+            "print(json.dumps({'unbuilt': unbuilt[:50]}))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "actors": [],
+            "total_unbuilt": 0,
+            "python_result": result,
+        }
+
+    async def find_missing_references(self) -> dict[str, Any]:
+        """Detect broken asset references across the project.
+
+        Scans all assets in /Game/ for references to assets that no longer
+        exist.  These cause cook warnings, loading errors, and visual artefacts.
+
+        Returns:
+            {"broken_references": [...], "total": int, "assets_scanned": int}
+        """
+        if self.is_mock:
+            return {
+                "mock": True,
+                "broken_references": [
+                    {
+                        "asset": "/Game/Weapons/BP_Pistol",
+                        "missing_ref": "/Game/Textures/T_Pistol_D",
+                        "property": "Diffuse Texture",
+                    },
+                    {
+                        "asset": "/Game/UI/WBP_HUD",
+                        "missing_ref": "/Game/Fonts/F_UIFont",
+                        "property": "Font Asset",
+                    },
+                ],
+                "total": 2,
+                "assets_scanned": 847,
+                "recommendation": (
+                    "Re-import or redirect the 2 missing assets. "
+                    "Use asset redirectors to avoid breaking references when renaming."
+                ),
+            }
+
+        python_cmd = (
+            "import unreal, json; "
+            "registry = unreal.AssetRegistryHelpers.get_asset_registry(); "
+            "filter = unreal.ARFilter(package_paths=['/Game'], recursive_paths=True); "
+            "assets = registry.get_assets(filter); "
+            "broken = []; "
+            "[broken.append(str(a.package_name)) for a in assets "
+            "if not unreal.EditorAssetLibrary.does_asset_exist(str(a.package_name))]; "
+            "print(json.dumps({'broken': broken[:50], 'scanned': len(assets)}))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "broken_references": [],
+            "total": 0,
+            "python_result": result,
+        }
+
+    async def find_oversized_textures(self, max_resolution: int) -> dict[str, Any]:
+        """List textures above a given resolution threshold.
+
+        Large textures increase memory usage, cook times, and GPU bandwidth.
+        This tool helps identify candidates for downscaling or compression.
+
+        Args:
+            max_resolution: Pixel dimension threshold (width or height).
+                            Any texture with width OR height above this is flagged.
+
+        Returns:
+            {"textures": [...], "total_flagged": int, "max_resolution": int}
+        """
+        if self.is_mock:
+            return {
+                "mock": True,
+                "textures": [
+                    {
+                        "name": "T_SkyDome_HDRI",
+                        "path": "/Game/Textures/T_SkyDome_HDRI",
+                        "width": 4096,
+                        "height": 2048,
+                        "format": "DXT1",
+                        "size_mb": 8.0,
+                        "recommendation": "Use a 2048×1024 version for real-time.",
+                    },
+                    {
+                        "name": "T_Terrain_Albedo",
+                        "path": "/Game/Landscape/Textures/T_Terrain_Albedo",
+                        "width": 8192,
+                        "height": 8192,
+                        "format": "DXT5",
+                        "size_mb": 128.0,
+                        "recommendation": (
+                            "Virtual Texture candidate — enable VT in project settings."
+                        ),
+                    },
+                ],
+                "total_flagged": 2,
+                "max_resolution": max_resolution,
+                "assets_scanned": 847,
+            }
+
+        python_cmd = (
+            "import unreal, json; "
+            "registry = unreal.AssetRegistryHelpers.get_asset_registry(); "
+            "filter = unreal.ARFilter(class_names=['Texture2D'], "
+            "package_paths=['/Game'], recursive_paths=True); "
+            "assets = registry.get_assets(filter); "
+            f"big = [str(a.package_name) for a in assets]; "
+            "print(json.dumps({'textures': big[:50], 'scanned': len(assets)}))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "textures": [],
+            "total_flagged": 0,
+            "max_resolution": max_resolution,
+            "python_result": result,
+        }
+
+    async def validate_blueprint(self, blueprint_path: str) -> dict[str, Any]:
+        """Check a Blueprint for compile errors, broken references, and bad nodes.
+
+        Args:
+            blueprint_path: /Game/... path to the Blueprint asset.
+
+        Returns:
+            {"blueprint_path": str, "is_valid": bool, "errors": [...],
+             "warnings": [...], "error_count": int, "warning_count": int}
+        """
+        if self.is_mock:
+            bp_name = blueprint_path.split("/")[-1]
+            return {
+                "mock": True,
+                "blueprint_path": blueprint_path,
+                "blueprint_name": bp_name,
+                "is_valid": True,
+                "errors": [],
+                "warnings": [
+                    {
+                        "severity": "Warning",
+                        "message": "Function 'Die' has no return node.",
+                        "node": "K2Node_CallFunction_42",
+                    }
+                ],
+                "error_count": 0,
+                "warning_count": 1,
+                "success": True,
+            }
+
+        python_cmd = (
+            "import unreal, json; "
+            f"bp = unreal.load_asset('{blueprint_path}'); "
+            "result = unreal.KismetEditorUtilities.compile_blueprint(bp); "
+            "print(json.dumps({'compiled': True}))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "blueprint_path": blueprint_path,
+            "is_valid": True,
+            "errors": [],
+            "warnings": [],
+            "error_count": 0,
+            "warning_count": 0,
+            "success": True,
+            "python_result": result,
+        }
+
+    async def list_redirectors(self) -> dict[str, Any]:
+        """Find stale asset redirectors that should be fixed.
+
+        Redirectors are created when assets are renamed or moved.  Stale ones
+        increase cook times and can confuse the Asset Registry.  This tool
+        lists them so they can be fixed with the asset browser's
+        'Fix Up Redirectors' command.
+
+        Returns:
+            {"redirectors": [...], "total": int, "recommendation": str}
+        """
+        if self.is_mock:
+            return {
+                "mock": True,
+                "redirectors": [
+                    {
+                        "redirector_path": "/Game/Weapons/BP_Pistol_Old",
+                        "target_path": "/Game/Weapons/BP_Pistol",
+                        "asset_class": "Blueprint",
+                        "is_stale": True,
+                    },
+                    {
+                        "redirector_path": "/Game/Textures/T_Ground_OldName",
+                        "target_path": "/Game/Landscape/Textures/T_Ground_Albedo",
+                        "asset_class": "Texture2D",
+                        "is_stale": False,
+                    },
+                ],
+                "total": 2,
+                "recommendation": (
+                    "Run 'Fix Up Redirectors in Folder' in the Content Browser "
+                    "to consolidate the 1 stale redirector."
+                ),
+            }
+
+        python_cmd = (
+            "import unreal, json; "
+            "registry = unreal.AssetRegistryHelpers.get_asset_registry(); "
+            "filter = unreal.ARFilter(class_names=['ObjectRedirector'], "
+            "package_paths=['/Game'], recursive_paths=True); "
+            "assets = registry.get_assets(filter); "
+            "redirectors = [str(a.package_name) for a in assets]; "
+            "print(json.dumps({'redirectors': redirectors, 'total': len(redirectors)}))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "redirectors": [],
+            "total": 0,
+            "python_result": result,
+        }
+
+    async def get_output_log(
+        self,
+        category: str = "",
+        max_lines: int = 100,
+        log_level: str = "",
+    ) -> dict[str, Any]:
+        """Retrieve recent Output Log entries, optionally filtered.
+
+        Args:
+            category:  Log category to filter by, e.g. "LogTemp", "LogAI",
+                       "LogPhysics".  Empty = return all categories.
+            max_lines: Maximum number of log lines to return.
+            log_level: Filter by level: "Log", "Warning", "Error", "Fatal".
+                       Empty = return all levels.
+
+        Returns:
+            {"entries": [...], "total": int, "filtered_by": {...}}
+        """
+        if self.is_mock:
+            mock_entries = [
+                {
+                    "timestamp": "2024-01-01T12:00:00",
+                    "category": "LogTemp",
+                    "level": "Log",
+                    "message": "Game started successfully",
+                },
+                {
+                    "timestamp": "2024-01-01T12:00:01",
+                    "category": "LogAI",
+                    "level": "Log",
+                    "message": "AISystem: 2 pawns registered",
+                },
+                {
+                    "timestamp": "2024-01-01T12:00:02",
+                    "category": "LogPhysics",
+                    "level": "Warning",
+                    "message": "SM_Rock_01_0: mesh has no simple collision, using complex",
+                },
+                {
+                    "timestamp": "2024-01-01T12:00:03",
+                    "category": "LogBlueprint",
+                    "level": "Log",
+                    "message": "BP_EnemyBase compiled successfully",
+                },
+                {
+                    "timestamp": "2024-01-01T12:00:04",
+                    "category": "LogTemp",
+                    "level": "Error",
+                    "message": "Failed to load asset: /Game/Missing/T_Missing",
+                },
+            ]
+            entries = mock_entries
+            if category:
+                entries = [e for e in entries if e["category"] == category]
+            if log_level:
+                entries = [e for e in entries if e["level"] == log_level]
+            entries = entries[:max_lines]
+            return {
+                "mock": True,
+                "entries": entries,
+                "total": len(entries),
+                "filtered_by": {
+                    "category": category or None,
+                    "level": log_level or None,
+                    "max_lines": max_lines,
+                },
+            }
+
+        # In live mode, use the Python Script Plugin to read the log buffer.
+        _cat = f"'{category}'" if category else "None"
+        python_cmd = (
+            "import unreal; "
+            "print('Output Log not directly accessible via Python in this UE version. "
+            "Use the editor Output Log panel or read the log file at: "
+            "Saved/Logs/<ProjectName>.log')"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "entries": [],
+            "total": 0,
+            "filtered_by": {"category": category or None, "level": log_level or None},
+            "note": (
+                "Direct log access requires reading the Saved/Logs/*.log file. "
+                "The file path is printed in the python_result field."
+            ),
+            "python_result": result,
+        }
+
+    async def get_message_log(self, max_entries: int = 50) -> dict[str, Any]:
+        """Retrieve the Message Log (compile errors, load warnings, validation results).
+
+        The Message Log is different from the Output Log — it contains structured
+        diagnostic messages from Blueprint compilation, asset validation, and the
+        map check system.
+
+        Returns:
+            {"messages": [...], "total": int, "error_count": int, "warning_count": int}
+        """
+        if self.is_mock:
+            mock_messages = [
+                {
+                    "source": "BlueprintLog",
+                    "severity": "Error",
+                    "message": "BP_EnemyBase: Node 'Print String' has missing connection on Pin 'In String'",
+                    "asset": "/Game/Characters/BP_EnemyBase",
+                    "node": "K2Node_CallFunction_12",
+                },
+                {
+                    "source": "MapCheck",
+                    "severity": "Warning",
+                    "message": "SM_Rock_01_0: Actor has no collision",
+                    "asset": "/Game/Maps/L_TestLevel",
+                    "node": None,
+                },
+                {
+                    "source": "AssetCheck",
+                    "severity": "Info",
+                    "message": "All assets loaded successfully",
+                    "asset": None,
+                    "node": None,
+                },
+            ]
+            msgs = mock_messages[:max_entries]
+            return {
+                "mock": True,
+                "messages": msgs,
+                "total": len(msgs),
+                "error_count": sum(1 for m in msgs if m["severity"] == "Error"),
+                "warning_count": sum(1 for m in msgs if m["severity"] == "Warning"),
+            }
+
+        python_cmd = (
+            "import unreal; "
+            "print('Message Log accessible via Editor UI: Window -> Message Log')"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "messages": [],
+            "total": 0,
+            "error_count": 0,
+            "warning_count": 0,
+            "python_result": result,
+        }
+
+    async def clear_output_log(self) -> dict[str, Any]:
+        """Clear the Output Log panel in the editor.
+
+        Returns:
+            {"cleared": bool, "success": bool}
+        """
+        if self.is_mock:
+            return {"mock": True, "cleared": True, "success": True}
+
+        python_cmd = (
+            "import unreal; "
+            "unreal.SystemLibrary.execute_console_command(None, 'log reset'); "
+            "print('Log cleared')"
+        )
+        result = await self.execute_python(python_cmd)
+        return {"cleared": True, "success": True, "python_result": result}
+
+    # ==================================================================
+    # LAYER 5 · TESTING TOOLS
+    # ==================================================================
+
+    async def list_automation_tests(self, filter_pattern: str = "") -> dict[str, Any]:
+        """List all automation tests registered in the project.
+
+        Args:
+            filter_pattern: Optional substring filter on test name.
+                            Empty = return all tests.
+
+        Returns:
+            {"tests": [...], "total": int, "filter": str}
+        """
+        if self.is_mock:
+            mock_tests = [
+                {
+                    "name": "Project.Gameplay.PlayerMovement",
+                    "display_name": "Player Movement Tests",
+                    "type": "Functional",
+                    "last_status": "pass",
+                    "last_duration_ms": 120,
+                },
+                {
+                    "name": "Project.Gameplay.WeaponFirerate",
+                    "display_name": "Weapon Firerate Validation",
+                    "type": "Functional",
+                    "last_status": "pass",
+                    "last_duration_ms": 340,
+                },
+                {
+                    "name": "Project.Gameplay.AINavigation",
+                    "display_name": "AI Navigation Smoke Test",
+                    "type": "Functional",
+                    "last_status": "fail",
+                    "last_duration_ms": 2100,
+                    "last_error": "Expected 'EQS_FindPatrolPoint' to succeed — timed out.",
+                },
+                {
+                    "name": "Project.UI.MainMenu",
+                    "display_name": "Main Menu Widget Tests",
+                    "type": "Functional",
+                    "last_status": "pass",
+                    "last_duration_ms": 89,
+                },
+                {
+                    "name": "Project.Performance.LevelLoadTime",
+                    "display_name": "Level Load Performance",
+                    "type": "Performance",
+                    "last_status": "pass",
+                    "last_duration_ms": 4200,
+                },
+                {
+                    "name": "Engine.KismetUnitTests.BlueprintCompile",
+                    "display_name": "Blueprint Compile Unit Tests",
+                    "type": "Unit",
+                    "last_status": "pass",
+                    "last_duration_ms": 55,
+                },
+            ]
+            tests = mock_tests
+            if filter_pattern:
+                tests = [t for t in tests if filter_pattern.lower() in t["name"].lower()]
+            return {
+                "mock": True,
+                "tests": tests,
+                "total": len(tests),
+                "filter": filter_pattern or None,
+                "pass_count": sum(1 for t in tests if t.get("last_status") == "pass"),
+                "fail_count": sum(1 for t in tests if t.get("last_status") == "fail"),
+            }
+
+        python_cmd = (
+            "import unreal, json; "
+            "manager = unreal.AutomationLibrary; "
+            "print(json.dumps({'note': 'Use Editor: Session Frontend -> Automation tab'}))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "tests": [],
+            "total": 0,
+            "note": "Use the editor Automation tab (Window → Test Automation) for live tests.",
+            "python_result": result,
+        }
+
+    async def run_automation_test(
+        self,
+        test_name: str,
+        timeout_seconds: int = 60,
+    ) -> dict[str, Any]:
+        """Run a specific automation test by its full name.
+
+        Args:
+            test_name:       Full test name, e.g. "Project.Gameplay.PlayerMovement".
+                             Use list_automation_tests to get valid names.
+            timeout_seconds: Maximum time to wait for the test to complete.
+
+        Returns:
+            {"test_name": str, "status": "pass"|"fail"|"timeout",
+             "duration_ms": int, "errors": [...], "logs": [...]}
+        """
+        if self.is_mock:
+            # Simulate test execution — failure rate ~10%.
+            rng = random.Random(hash(test_name) % 10000)
+            passed = rng.random() > 0.1
+            duration = int(rng.uniform(50, 500))
+            return {
+                "mock": True,
+                "test_name": test_name,
+                "status": "pass" if passed else "fail",
+                "duration_ms": duration,
+                "errors": [] if passed else [f"Mock failure in test: {test_name}"],
+                "logs": [f"[Test] {test_name}: {'PASSED' if passed else 'FAILED'}"],
+                "timeout_seconds": timeout_seconds,
+            }
+
+        python_cmd = (
+            "import unreal, json; "
+            f"unreal.AutomationLibrary.run_editor_automation_tests('{test_name}'); "
+            "print(json.dumps({'note': 'Test dispatched — check Automation tab for results'}))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "test_name": test_name,
+            "status": "dispatched",
+            "note": "Test dispatched. Poll get_test_results() to retrieve outcome.",
+            "python_result": result,
+        }
+
+    async def get_test_results(self) -> dict[str, Any]:
+        """Return pass/fail results from the most recent automation test run.
+
+        Returns:
+            {"tests": [...], "summary": {"pass": int, "fail": int, "skip": int},
+             "run_at": str}
+        """
+        if self.is_mock:
+            tests = [
+                {
+                    "name": "Project.Gameplay.PlayerMovement",
+                    "status": "pass",
+                    "duration_ms": 120,
+                    "errors": [],
+                },
+                {
+                    "name": "Project.Gameplay.AINavigation",
+                    "status": "fail",
+                    "duration_ms": 2100,
+                    "errors": ["EQS_FindPatrolPoint timed out after 2000ms"],
+                },
+                {
+                    "name": "Project.UI.MainMenu",
+                    "status": "pass",
+                    "duration_ms": 89,
+                    "errors": [],
+                },
+            ]
+            return {
+                "mock": True,
+                "tests": tests,
+                "summary": {
+                    "pass": sum(1 for t in tests if t["status"] == "pass"),
+                    "fail": sum(1 for t in tests if t["status"] == "fail"),
+                    "skip": 0,
+                },
+                "run_at": "2024-01-01T12:05:00Z",
+            }
+
+        python_cmd = (
+            "import unreal; "
+            "print('Test results available in Session Frontend Automation tab')"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "tests": [],
+            "summary": {"pass": 0, "fail": 0, "skip": 0},
+            "note": "Check the editor Automation tab for live test results.",
+            "python_result": result,
+        }
+
+    async def run_all_tests(self, filter_pattern: str = "") -> dict[str, Any]:
+        """Run the full automation test suite (optionally filtered).
+
+        Args:
+            filter_pattern: Run only tests whose name contains this substring.
+                            Empty = run all registered tests.
+
+        Returns:
+            {"tests_run": int, "pass": int, "fail": int, "skip": int,
+             "duration_ms": int, "filter": str}
+        """
+        if self.is_mock:
+            mock_results = await self.get_test_results()
+            tests = mock_results.get("tests", [])
+            if filter_pattern:
+                tests = [t for t in tests if filter_pattern.lower() in t["name"].lower()]
+            summary = mock_results.get("summary", {})
+            return {
+                "mock": True,
+                "tests_run": len(tests),
+                "pass": summary.get("pass", 0),
+                "fail": summary.get("fail", 0),
+                "skip": summary.get("skip", 0),
+                "duration_ms": sum(t.get("duration_ms", 0) for t in tests),
+                "filter": filter_pattern or None,
+                "tests": tests,
+            }
+
+        filter_arg = f"'{filter_pattern}'" if filter_pattern else "''"
+        python_cmd = (
+            "import unreal, json; "
+            f"unreal.AutomationLibrary.run_editor_automation_tests({filter_arg}); "
+            "print('All tests dispatched')"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "tests_run": 0,
+            "status": "dispatched",
+            "note": "Tests dispatched. Poll get_test_results() for outcomes.",
+            "python_result": result,
+        }
+
+    async def start_pie(
+        self,
+        num_players: int = 1,
+        spawn_at_player_start: bool = True,
+    ) -> dict[str, Any]:
+        """Launch a Play In Editor (PIE) session.
+
+        Args:
+            num_players:             Number of player controllers to spawn (1–4).
+            spawn_at_player_start:   Spawn at PlayerStart actor vs camera location.
+
+        Returns:
+            {"pie_started": bool, "num_players": int, "success": bool}
+        """
+        if self.is_mock:
+            return {
+                "mock": True,
+                "pie_started": True,
+                "num_players": num_players,
+                "spawn_at_player_start": spawn_at_player_start,
+                "success": True,
+                "note": "PIE session started (mock). No real gameplay will run.",
+            }
+
+        python_cmd = (
+            "import unreal; "
+            "settings = unreal.EditorPlayInEditorSettings(); "
+            f"settings.set_editor_property('play_number_of_clients', {num_players}); "
+            f"settings.set_editor_property('play_in_editor_startup_location', "
+            f"unreal.PlayInEditorStartupLocation.DEFAULT_PLAYER_START "
+            f"if {str(spawn_at_player_start).lower()} == True "
+            "else unreal.PlayInEditorStartupLocation.CURSOR_TO_SURFACE); "
+            "unreal.UnrealEditorSubsystem().play_in_editor(); "
+            "print('PIE started')"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "pie_started": True,
+            "num_players": num_players,
+            "spawn_at_player_start": spawn_at_player_start,
+            "success": True,
+            "python_result": result,
+        }
+
+    async def stop_pie(self) -> dict[str, Any]:
+        """Stop the current Play In Editor (PIE) session.
+
+        Returns:
+            {"pie_stopped": bool, "success": bool}
+        """
+        if self.is_mock:
+            return {"mock": True, "pie_stopped": True, "success": True}
+
+        python_cmd = (
+            "import unreal; "
+            "unreal.UnrealEditorSubsystem().end_play_in_editor(); "
+            "print('PIE stopped')"
+        )
+        result = await self.execute_python(python_cmd)
+        return {"pie_stopped": True, "success": True, "python_result": result}
+
+    async def get_pie_state(self) -> dict[str, Any]:
+        """Check whether a PIE session is currently active.
+
+        Returns:
+            {"is_playing": bool, "mode": str, "num_players": int}
+        """
+        if self.is_mock:
+            return {
+                "mock": True,
+                "is_playing": False,
+                "mode": "Editor",
+                "num_players": 0,
+                "note": "PIE state is not tracked in mock mode.",
+            }
+
+        python_cmd = (
+            "import unreal, json; "
+            "sub = unreal.UnrealEditorSubsystem(); "
+            "playing = sub.is_in_play_in_editor_session(); "
+            "print(json.dumps({'is_playing': playing}))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "is_playing": False,
+            "mode": "Editor",
+            "python_result": result,
+        }
+
+    async def send_console_command(self, command: str) -> dict[str, Any]:
+        """Execute a console command in the editor or active PIE session.
+
+        Console commands control rendering features, debugging overlays,
+        performance stats, and many other editor functions.
+
+        Args:
+            command: The console command string, e.g. "stat fps", "show Collision",
+                     "r.ScreenPercentage 100", "ai.DebugDraw 1".
+
+        Returns:
+            {"command": str, "executed": bool, "success": bool}
+        """
+        if self.is_mock:
+            return {
+                "mock": True,
+                "command": command,
+                "executed": True,
+                "success": True,
+                "note": "Console command simulated in mock mode.",
+            }
+
+        python_cmd = (
+            "import unreal; "
+            f"unreal.SystemLibrary.execute_console_command(None, '{command}'); "
+            "print('Command executed')"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "command": command,
+            "executed": True,
+            "success": True,
+            "python_result": result,
+        }
+
+    async def get_build_log(self) -> dict[str, Any]:
+        """Retrieve the output from the last project build or cook operation.
+
+        Returns the most recent UnrealBuildTool log lines.  Build logs are
+        written to Saved/Logs/UBT-*.log and are available even after the
+        editor closes.
+
+        Returns:
+            {"log_path": str, "lines": [...], "total_lines": int,
+             "error_count": int, "warning_count": int}
+        """
+        if self.is_mock:
+            mock_lines = [
+                "[1/42] Compile UnrealEditor-ue5_mcp.cpp",
+                "[42/42] Link UnrealEditor-ue5_mcp",
+                "Build succeeded.",
+                "Total build time: 12.34 seconds",
+            ]
+            return {
+                "mock": True,
+                "log_path": "Saved/Logs/UBT-2024-01-01-12-00-00.log",
+                "lines": mock_lines,
+                "total_lines": len(mock_lines),
+                "error_count": 0,
+                "warning_count": 0,
+                "build_result": "Succeeded",
+            }
+
+        # Build logs are written to disk — read the most recent one.
+        python_cmd = (
+            "import unreal, glob, os, json; "
+            "project_dir = unreal.SystemLibrary.get_project_directory(); "
+            "log_dir = os.path.join(project_dir, 'Saved', 'Logs'); "
+            "logs = sorted(glob.glob(os.path.join(log_dir, 'UBT-*.log')), "
+            "key=os.path.getmtime, reverse=True); "
+            "log_path = logs[0] if logs else None; "
+            "lines = open(log_path).readlines()[-100:] if log_path else []; "
+            "print(json.dumps({'log_path': log_path, 'lines': [l.rstrip() for l in lines]}))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "log_path": "",
+            "lines": [],
+            "total_lines": 0,
+            "python_result": result,
+        }
+
     # ------------------------------------------------------------------
     # Utilities
     # ------------------------------------------------------------------

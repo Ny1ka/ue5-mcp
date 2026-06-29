@@ -126,7 +126,7 @@ def test_ui_dashboard_endpoints() -> None:
 
     page = client.get("/")
     assert page.status_code == 200
-    assert "ue5-mcp" in page.text
+    assert "UE5" in page.text
 
 
 def test_format_json(mock_client: UEClient) -> None:

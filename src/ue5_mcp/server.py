@@ -6,7 +6,14 @@ from ue5_mcp.bridge.client import UEClient
 from ue5_mcp.config import get_settings
 from ue5_mcp.prompts import register_workflow_prompts
 from ue5_mcp.resources import register_engine_resources
-from ue5_mcp.tools import register_asset_tools, register_editor_tools, register_environment_tools
+from ue5_mcp.tools import (
+    register_asset_tools,
+    register_blueprint_tools,
+    register_debugging_tools,
+    register_editor_tools,
+    register_environment_tools,
+    register_testing_tools,
+)
 
 # FastMCP instance — name appears in MCP client UI
 mcp = FastMCP(
@@ -15,7 +22,9 @@ mcp = FastMCP(
         "MCP server for Unreal Engine 5. Use tools to query and control the editor "
         "when connected. Enable mock mode (UE_MOCK_MODE=true) for development without UE. "
         "Always call list_project_assets first to understand what exists in the project "
-        "before generating Blueprints, placing assets, or diagnosing issues."
+        "before generating Blueprints, placing assets, or diagnosing issues. "
+        "For debugging issues, start with check_actor_collision or get_output_log. "
+        "For testing, use list_automation_tests then run_automation_test."
     ),
 )
 
@@ -25,9 +34,23 @@ def create_app() -> FastMCP:
     settings = get_settings()
     client = UEClient(settings)
 
+    # Layer 1 — Project Knowledge
     register_editor_tools(mcp, client)
     register_asset_tools(mcp, client)
+
+    # Layer 2 — Environment Tools
     register_environment_tools(mcp, client)
+
+    # Layer 3 — Blueprint Tools
+    register_blueprint_tools(mcp, client)
+
+    # Layer 4 — Debugging Tools
+    register_debugging_tools(mcp, client)
+
+    # Layer 5 — Testing Tools
+    register_testing_tools(mcp, client)
+
+    # Resources and Prompts
     register_engine_resources(mcp, client)
     register_workflow_prompts(mcp)
 

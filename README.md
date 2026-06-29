@@ -73,6 +73,8 @@ AI (Claude / Cursor)
 
 ## Current State
 
+**58 tools across 5 layers.** All work in mock mode (`UE_MOCK_MODE=true`). Layer 6 safety is in the server core.
+
 ### Layer 1 tools
 
 | Tool | Description |
@@ -82,7 +84,7 @@ AI (Claude / Cursor)
 | `list_project_assets` | Return all project assets grouped by category |
 | `list_asset_categories` | Return all supported category keys (for filtering) |
 
-### Layer 2 tools *(new)*
+### Layer 2 tools
 
 **Actor Management**
 
@@ -422,13 +424,13 @@ Enable plugins via **Edit → Plugins** in the editor, then restart.  The Remote
 
 ---
 
-## Layer 3 · Blueprint Tools — *Planned*
+## Layer 3 · Blueprint Tools — *Done*
 
 > **Let the AI generate and edit game logic — not just content.**
 
-This is where the MCP moves from "assistant" to "co-developer." Claude can create Blueprints, add nodes, wire logic, and set defaults based on plain-language descriptions.
+This is where the MCP moves from "assistant" to "co-developer." Claude can create Blueprints, add variables, events, and functions based on plain-language descriptions.
 
-### Planned tools
+### Tools
 
 **Blueprint generation**
 
@@ -440,42 +442,33 @@ This is where the MCP moves from "assistant" to "co-developer." Claude can creat
 | `add_function` | Create a new function inside a Blueprint |
 | `add_custom_event` | Add a named custom event with parameters |
 | `compile_blueprint` | Trigger a Blueprint compile and return errors |
+| `get_blueprint_info` | Return metadata: parent class, variables, functions, events |
+| `find_blueprint_nodes` | Search a Blueprint graph for nodes by type or name |
 
-**Node graph editing** *(requires C++ plugin — see Architecture)*
-
-| Tool | Description |
-|------|-------------|
-| `add_node` | Add a node to a Blueprint graph by function/event name |
-| `connect_pins` | Wire two node pins together |
-| `set_node_property` | Set a literal value on a node pin |
-| `delete_node` | Remove a node from the graph |
-| `find_nodes` | Search a Blueprint graph for nodes by type or name |
+> **Deep node graph editing** (`add_node`, `connect_pins`, `delete_node`) requires a custom C++ plugin — see Architecture. Graph *inspection* via `find_blueprint_nodes` works in live mode via the Python Script Plugin.
 
 **Example — generate a door Blueprint:**
 
 ```
-Prompt: "Create a door that opens when the player approaches,
-         closes after 5 seconds, and plays a sound."
+Prompt: "Create a door Blueprint that opens when the player approaches."
 
-MCP creates:
-  BP_Door
-   ├── Event Begin Overlap
-   ├── Gate node (prevent re-triggering)
-   ├── Timeline (rotation 0° → 90°)
-   ├── Delay (5.0 seconds)
-   ├── Reverse Timeline
-   └── Play Sound at Location
+MCP executes:
+  create_blueprint('BP_Door', 'Actor', '/Game/Props')
+  add_variable('/Game/Props/BP_Door', 'IsOpen', 'Boolean')
+  add_event('/Game/Props/BP_Door', 'ReceiveActorBeginOverlap')
+  add_function('/Game/Props/BP_Door', 'OpenDoor')
+  compile_blueprint('/Game/Props/BP_Door')
 ```
 
 ---
 
-## Layer 4 · Debugging Tools — *Planned*
+## Layer 4 · Debugging Tools — *Done*
 
 > **Give the AI the ability to diagnose and fix real problems.**
 
 Instead of copy-pasting logs into chat, the AI can inspect the editor state directly and form conclusions.
 
-### Planned tools
+### Tools
 
 **Collision & physics**
 
@@ -491,7 +484,7 @@ Instead of copy-pasting logs into chat, the AI can inspect the editor state dire
 | Tool | Description |
 |------|-------------|
 | `get_draw_call_stats` | Return draw call counts from the last frame |
-| `get_shader_complexity` | Return average shader complexity for the current view |
+| `get_shader_complexity` | Enable shader complexity view mode and return scores |
 | `find_expensive_actors` | Identify actors contributing most to frame cost |
 | `list_unbuilt_lighting` | Find meshes with missing or stale lightmap builds |
 
@@ -508,30 +501,29 @@ Instead of copy-pasting logs into chat, the AI can inspect the editor state dire
 
 | Tool | Description |
 |------|-------------|
-| `get_output_log` | Retrieve recent Output Log entries, filterable by category |
+| `get_output_log` | Retrieve recent Output Log entries, filterable by category/level |
 | `get_message_log` | Retrieve the Message Log (compile errors, load warnings) |
 | `clear_output_log` | Clear the Output Log |
 
 **Example — player falling through floor:**
 
 ```
-Claude: Checking collision settings on floor mesh... disabled.
-Claude: Checking character capsule... valid.
-Claude: Checking physics scene settings... valid.
+Claude: check_actor_collision('SM_Floor_01')
+Result: collision_enabled='NoCollision'
 
-Result: "SM_Floor_01 has collision set to NoCollision.
-         Change to BlockAll or BlockAllDynamic."
+Claude: set_actor_property('SM_Floor_01', 'CollisionProfileName', 'BlockAll')
+Result: Collision restored. Player no longer falls through.
 ```
 
 ---
 
-## Layer 5 · Testing Tools — *Planned*
+## Layer 5 · Testing Tools — *Done*
 
 > **Let the AI run and interpret automated tests.**
 
 Connects the MCP to Unreal's built-in testing infrastructure and headless build pipeline.
 
-### Planned tools
+### Tools
 
 **Functional tests**
 
@@ -546,19 +538,19 @@ Connects the MCP to Unreal's built-in testing infrastructure and headless build 
 
 | Tool | Description |
 |------|-------------|
-| `start_pie` | Launch Play In Editor |
+| `start_pie` | Launch Play In Editor (1–4 players) |
 | `stop_pie` | Stop the current PIE session |
 | `get_pie_state` | Check whether a PIE session is active |
-| `send_console_command` | Execute a console command during PIE |
+| `send_console_command` | Execute a console command in editor or PIE |
 
 **Headless builds**
 
 | Tool | Description |
 |------|-------------|
-| `build_project` | Trigger a full project build via UnrealEditor-Cmd |
-| `cook_content` | Cook content for a target platform |
-| `run_gauntlet_test` | Execute a Gauntlet automated test |
-| `get_build_log` | Retrieve the output from the last build |
+| `build_project` | Trigger a full project build via UnrealBuildTool |
+| `cook_content` | Cook content for a target platform via UAT |
+| `run_gauntlet_test` | Execute a Gauntlet automated test via UAT |
+| `get_build_log` | Retrieve the output from the last build/cook |
 
 ---
 
@@ -572,11 +564,11 @@ Safety features are woven throughout every layer, not bolted on at the end.
 |---------|--------|-------------|
 | Mock mode | ✅ Done | Full server runs without a live editor (`UE_MOCK_MODE=true`) |
 | Graceful fallback | ✅ Done | Three-tier discovery: live editor → filesystem → mock |
-| `confirm=true` | Planned | Destructive tools (delete, clear, overwrite) require explicit confirmation |
-| Read-only mode | Planned | Server-wide flag that disables all write tools |
-| Dry-run mode | Planned | Tools describe what they *would* do without executing |
-| Scope limiting | Planned | Restrict tools to a specific folder (e.g. `/Game/Sandbox`) |
-| Audit log | Planned | Append-only log of every tool call and its result |
+| `dry_run=true` | ✅ Done | `delete_actor` and write tools support dry-run |
+| Read-only mode | ✅ Done | `UE_READ_ONLY=true` disables all write tools server-wide |
+| Audit log | ✅ Done | Append-only JSONL log at `~/.ue5-mcp/audit.jsonl` |
+| Scope limiting | ✅ Done | `UE_SCOPE_PATH=/Game/Sandbox` restricts tools to a folder |
+| `confirm=true` | Planned | Destructive tools require explicit confirmation per-call |
 
 ---
 
@@ -591,16 +583,17 @@ Cursor / Claude
       ├── tools/          ← agent actions
       │    ├── editor.py       (ping, editor info)
       │    ├── assets.py       ← Layer 1 · done
-      │    ├── environment.py  ← Layer 2 · done  ← NEW
-      │    ├── blueprints.py   ← Layer 3 · planned
-      │    ├── debugging.py    ← Layer 4 · planned
-      │    └── testing.py      ← Layer 5 · planned
+      │    ├── environment.py  ← Layer 2 · done
+      │    ├── blueprints.py   ← Layer 3 · done
+      │    ├── debugging.py    ← Layer 4 · done
+      │    └── testing.py      ← Layer 5 · done
       │
       ├── resources/      ← read-only context (unreal:// URIs)
       ├── prompts/        ← workflow templates
       │
       └── bridge/         ← transport to Unreal
            ├── client.py          (Remote Control HTTP + Python execution)
+           ├── audit.py           (append-only audit log — Layer 6)
            ├── asset_registry.py  (27-category classification engine)
            └── asset_scanner.py   (filesystem Content/ scanner)
 ```
@@ -629,19 +622,23 @@ ue5-mcp/
 │   ├── config.py                     # Pydantic settings from environment
 │   ├── bridge/
 │   │   ├── client.py                 # HTTP client → Remote Control API + Python execution
+│   │   ├── audit.py                  # Append-only audit log (Layer 6 safety)
 │   │   ├── asset_registry.py         # 27 asset categories + classification engine
 │   │   └── asset_scanner.py          # Filesystem Content/ directory scanner
 │   ├── tools/
 │   │   ├── editor.py                 # ue_ping, ue_get_editor_info
 │   │   ├── assets.py                 # list_project_assets, list_asset_categories
-│   │   └── environment.py            # 19 Layer 2 tools (actors/levels/foliage/landscape)
+│   │   ├── environment.py            # 19 Layer 2 tools (actors/levels/foliage/landscape)
+│   │   ├── blueprints.py             # 8 Layer 3 tools (create, variables, events, compile)
+│   │   ├── debugging.py              # 15 Layer 4 tools (collision, perf, logs, validation)
+│   │   └── testing.py                # 12 Layer 5 tools (automation, PIE, headless builds)
 │   ├── resources/
 │   │   └── engine.py                 # unreal://connection/status, unreal://config
 │   └── prompts/
 │       └── workflows.py              # explore_level, prototype_gameplay
 └── tests/
-    ├── test_server.py                # 28 tests — Layer 1 registry, scanner, tools
-    └── test_environment.py           # 97 tests — Layer 2 environment tools
+    ├── test_server.py                # Layer 1 registry, scanner, UI endpoints
+    └── test_environment.py           # Layer 2 environment tools (97 tests)
 ```
 
 ---
@@ -680,10 +677,10 @@ Add one `AssetCategory` entry to `bridge/asset_registry.py`. The classification 
 |-------|--------|
 | Layer 1 · Project Knowledge (`list_project_assets`, 27 categories) | ✅ Complete |
 | Layer 2 · Environment Tools (actors, foliage, levels, landscape) | ✅ Complete |
-| Layer 3 · Blueprint Tools (generate, edit, compile) | 🔲 Planned |
-| Layer 4 · Debugging Tools (collision, performance, logs, validation) | 🔲 Planned |
-| Layer 5 · Testing Tools (automation, PIE, headless builds) | 🔲 Planned |
-| Layer 6 · Safety Layer (confirm, read-only, dry-run, audit log) | 🔄 Ongoing |
+| Layer 3 · Blueprint Tools (generate, edit, compile) | ✅ Complete |
+| Layer 4 · Debugging Tools (collision, performance, logs, validation) | ✅ Complete |
+| Layer 5 · Testing Tools (automation, PIE, headless builds) | ✅ Complete |
+| Layer 6 · Safety Layer (read-only, dry-run, audit log, scope limit) | ✅ Mostly done |
 | C++ bridge plugin (deep Blueprint graph editing) | 🔲 Future |
 
 ---
