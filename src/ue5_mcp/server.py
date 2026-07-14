@@ -12,6 +12,7 @@ from ue5_mcp.tools import (
     register_debugging_tools,
     register_editor_tools,
     register_environment_tools,
+    register_spatial_tools,
     register_testing_tools,
 )
 
@@ -24,7 +25,13 @@ mcp = FastMCP(
         "Always call list_project_assets first to understand what exists in the project "
         "before generating Blueprints, placing assets, or diagnosing issues. "
         "For debugging issues, start with check_actor_collision or get_output_log. "
-        "For testing, use list_automation_tests then run_automation_test."
+        "For testing, use list_automation_tests then run_automation_test. "
+        "When building environments: call sync_occupancy_grid at session start, then use "
+        "spawn_actor_safe (not spawn_actor) for all actor placement — it validates "
+        "occupancy, snaps to ground, checks slope, and tracks every actor so nothing "
+        "overlaps. Use validate_spawn for a dry-run check before committing. "
+        "Use show_occupancy_debug to visualise occupied cells and preview_spawn to "
+        "preview placement without spawning."
     ),
 )
 
@@ -40,6 +47,9 @@ def create_app() -> FastMCP:
 
     # Layer 2 — Environment Tools
     register_environment_tools(mcp, client)
+
+    # Layer 1.5 — Spatial Validation
+    register_spatial_tools(mcp, client)
 
     # Layer 3 — Blueprint Tools
     register_blueprint_tools(mcp, client)

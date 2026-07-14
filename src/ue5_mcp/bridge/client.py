@@ -3357,6 +3357,222 @@ class UEClient:
         }
 
     # ------------------------------------------------------------------
+    # Spatial validation bridge methods (Layer 1.5)
+    # ------------------------------------------------------------------
+
+    async def get_asset_static_mesh_bounds(self, asset_path: str) -> dict[str, Any]:
+        """Return the half-extents of a StaticMesh asset before it is spawned.
+
+        This is the key method for pre-spawn collision sizing.  It loads the
+        uninstantiated mesh via unreal.load_asset() and reads its bounding box,
+        so the occupancy grid can reserve the correct footprint before the actor
+        exists in the level.
+
+        Args:
+            asset_path: Full /Game/... path to the StaticMesh.
+
+        Returns:
+            {"extent": {"X": float, "Y": float, "Z": float}, "asset_path": str}
+            where X/Y/Z are the **half**-extents in Unreal centimetres.
+        """
+        if self.is_mock:
+            # Return a size scaled loosely to the asset name for variety
+            mesh_name = asset_path.split("/")[-1].lower()
+            if any(kw in mesh_name for kw in ("tree", "pine", "oak")):
+                ext = {"X": 120.0, "Y": 120.0, "Z": 400.0}
+            elif any(kw in mesh_name for kw in ("rock", "stone", "boulder")):
+                ext = {"X": 80.0, "Y": 80.0, "Z": 60.0}
+            elif any(kw in mesh_name for kw in ("house", "building", "barn")):
+                ext = {"X": 500.0, "Y": 600.0, "Z": 300.0}
+            elif any(kw in mesh_name for kw in ("wall", "fence")):
+                ext = {"X": 10.0, "Y": 200.0, "Z": 150.0}
+            else:
+                ext = {"X": 100.0, "Y": 100.0, "Z": 100.0}
+            return {"mock": True, "asset_path": asset_path, "extent": ext}
+
+        python_cmd = (
+            "import unreal, json; "
+            f"mesh = unreal.load_asset('{asset_path}'); "
+            "bounds = mesh.get_bounds() if mesh else None; "
+            "ext = bounds.box_extent if bounds else unreal.Vector(100,100,100); "
+            "print(json.dumps({'extent': {'X': ext.x, 'Y': ext.y, 'Z': ext.z}}))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "asset_path": asset_path,
+            "extent": result.get("extent", {"X": 100.0, "Y": 100.0, "Z": 100.0}),
+            "python_result": result,
+        }
+
+    async def line_trace_surface(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        trace_distance_cm: float = 50000.0,
+    ) -> dict[str, Any]:
+        """Fire a downward line trace to find the ground surface below (x, y, z).
+
+        Used by SpawnValidator to:
+          • Determine the real ground Z so actors land on terrain, not float
+          • Extract the surface normal for slope checks and align_to_normal
+
+        Args:
+            x, y, z:            World-space start position (cm).
+            trace_distance_cm:  How far down to trace.  Default 500 m.
+
+        Returns:
+            {
+              "hit": bool,
+              "location": {"X": float, "Y": float, "Z": float},
+              "normal":   {"X": float, "Y": float, "Z": float},
+            }
+        """
+        if self.is_mock:
+            return {
+                "mock": True,
+                "hit": True,
+                "location": {"X": x, "Y": y, "Z": 0.0},
+                "normal": {"X": 0.0, "Y": 0.0, "Z": 1.0},
+            }
+
+        end_z = z - trace_distance_cm
+        python_cmd = (
+            "import unreal, json; "
+            "world = unreal.UnrealEditorSubsystem().get_editor_world(); "
+            f"start = unreal.Vector({x}, {y}, {z}); "
+            f"end   = unreal.Vector({x}, {y}, {end_z}); "
+            "hit = unreal.SystemLibrary.line_trace_single("
+            "world, start, end, "
+            "unreal.TraceTypeQuery.TRACE_TYPE_QUERY1, "
+            "False, [], unreal.DrawDebugTrace.NONE, True); "
+            "loc = hit.location if hit.blocking_hit else unreal.Vector(0,0,0); "
+            "nrm = hit.impact_normal if hit.blocking_hit else unreal.Vector(0,0,1); "
+            "print(json.dumps({"
+            "'hit': hit.blocking_hit, "
+            "'location': {'X': loc.x, 'Y': loc.y, 'Z': loc.z}, "
+            "'normal':   {'X': nrm.x, 'Y': nrm.y, 'Z': nrm.z}"
+            "}))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "hit": result.get("hit", False),
+            "location": result.get("location", {"X": x, "Y": y, "Z": z}),
+            "normal": result.get("normal", {"X": 0.0, "Y": 0.0, "Z": 1.0}),
+            "python_result": result,
+        }
+
+    async def overlap_sphere_test(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        radius_cm: float,
+    ) -> dict[str, Any]:
+        """Return all WorldStatic actors overlapping a sphere at (x, y, z).
+
+        Used as the UE-side collision check after the in-memory grid check
+        passes.  This is the heavier but authoritative collision query.
+
+        Returns:
+            {"overlapping_actors": [str, ...], "count": int}
+        """
+        if self.is_mock:
+            return {
+                "mock": True,
+                "overlapping_actors": [],
+                "count": 0,
+            }
+
+        python_cmd = (
+            "import unreal, json; "
+            "world = unreal.UnrealEditorSubsystem().get_editor_world(); "
+            f"pos = unreal.Vector({x}, {y}, {z}); "
+            "overlaps = unreal.SystemLibrary.sphere_overlap_actors("
+            "world, pos, "
+            f"{radius_cm}, "
+            "[unreal.ObjectTypeQuery.OBJECT_TYPE_QUERY1, "
+            "unreal.ObjectTypeQuery.OBJECT_TYPE_QUERY2], "
+            "None, []); "
+            "names = [a.get_name() for a in overlaps] if overlaps else []; "
+            "print(json.dumps({'overlapping_actors': names, 'count': len(names)}))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "overlapping_actors": result.get("overlapping_actors", []),
+            "count": result.get("count", 0),
+            "python_result": result,
+        }
+
+    async def get_actor_bounds(self, actor_name: str) -> dict[str, Any]:
+        """Return the world-space AABB (origin + half-extents) of an existing actor.
+
+        Used by drift_check to compare live actor positions against grid entries.
+
+        Returns:
+            {
+              "origin":  {"X": float, "Y": float, "Z": float},
+              "extent":  {"X": float, "Y": float, "Z": float},
+            }
+        """
+        if self.is_mock:
+            actor = next(
+                (a for a in _MOCK_ACTORS if a["name"] == actor_name), None
+            )
+            loc = actor["location"] if actor else {"x": 0, "y": 0, "z": 0}
+            return {
+                "mock": True,
+                "actor": actor_name,
+                "found": actor is not None,
+                "origin": {"X": loc["x"], "Y": loc["y"], "Z": loc["z"]},
+                "extent": {"X": 100.0, "Y": 100.0, "Z": 100.0},
+            }
+
+        python_cmd = (
+            "import unreal, json; "
+            "world = unreal.UnrealEditorSubsystem().get_editor_world(); "
+            "actors = unreal.EditorActorSubsystem().get_all_level_actors(); "
+            f"actor = next((a for a in actors if a.get_name() == '{actor_name}'), None); "
+            "origin, extent = actor.get_actor_bounds(False) if actor else "
+            "(unreal.Vector(0,0,0), unreal.Vector(0,0,0)); "
+            "print(json.dumps({"
+            "'found': actor is not None, "
+            "'origin': {'X': origin.x, 'Y': origin.y, 'Z': origin.z}, "
+            "'extent': {'X': extent.x, 'Y': extent.y, 'Z': extent.z}"
+            "}))"
+        )
+        result = await self.execute_python(python_cmd)
+        return {
+            "actor": actor_name,
+            "found": result.get("found", False),
+            "origin": result.get("origin", {"X": 0.0, "Y": 0.0, "Z": 0.0}),
+            "extent": result.get("extent", {"X": 0.0, "Y": 0.0, "Z": 0.0}),
+            "python_result": result,
+        }
+
+    async def flush_debug_geometry(self) -> dict[str, Any]:
+        """Clear all persistent debug lines, boxes, and strings from the viewport.
+
+        Called by clear_occupancy_debug to remove the visualisation drawn by
+        show_occupancy_debug and preview_spawn.
+
+        Returns:
+            {"flushed": True, "success": True}
+        """
+        if self.is_mock:
+            return {"mock": True, "flushed": True, "success": True}
+
+        python_cmd = (
+            "import unreal; "
+            "world = unreal.UnrealEditorSubsystem().get_editor_world(); "
+            "unreal.SystemLibrary.flush_persistent_debug_lines(world); "
+            "unreal.SystemLibrary.flush_debug_strings(world); "
+            "print('Debug geometry cleared')"
+        )
+        result = await self.execute_python(python_cmd)
+        return {"flushed": True, "success": True, "python_result": result}
+
+    # ------------------------------------------------------------------
     # Utilities
     # ------------------------------------------------------------------
 

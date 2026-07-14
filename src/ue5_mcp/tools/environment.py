@@ -36,6 +36,7 @@ from typing import Annotated, Any
 from mcp.server.fastmcp import FastMCP
 
 from ue5_mcp.bridge.client import UEClient, UEConnectionError
+from ue5_mcp.spatial import OCCUPANCY_GRID
 
 
 def register_environment_tools(mcp: FastMCP, client: UEClient) -> None:
@@ -131,6 +132,13 @@ def register_environment_tools(mcp: FastMCP, client: UEClient) -> None:
         scale_x: Annotated[float, "X scale factor. 1.0 = default size."] = 1.0,
         scale_y: Annotated[float, "Y scale factor."] = 1.0,
         scale_z: Annotated[float, "Z scale factor."] = 1.0,
+        validate: Annotated[
+            bool,
+            "If true, run spatial validation (occupancy grid + ground snap) before "
+            "spawning. Rejects unsafe placements and adjusts Z to ground level. "
+            "Default false — set to true when building environments. "
+            "For full validation with grid tracking, prefer spawn_actor_safe.",
+        ] = False,
     ) -> str:
         """Spawn a Blueprint or native actor in the current level.
 
@@ -138,11 +146,41 @@ def register_environment_tools(mcp: FastMCP, client: UEClient) -> None:
         actor's name and full object path so subsequent tools (move_actor,
         set_actor_property) can reference it immediately.
 
+        Set validate=true to run a lightweight spatial check (overlap + ground
+        snap) before spawning.  For full validated placement with grid tracking,
+        use spawn_actor_safe instead.
+
         Requires: EditorScriptingUtilities plugin enabled in the editor.
         """
         location = {"x": location_x, "y": location_y, "z": location_z}
         rotation = {"pitch": rotation_pitch, "yaw": rotation_yaw, "roll": rotation_roll}
         scale = {"x": scale_x, "y": scale_y, "z": scale_z}
+
+        if validate:
+            from ue5_mcp.spatial import SpawnValidator
+            from ue5_mcp.spatial.schema import PlacementIntent, Rotation3, SpatialConstraints, Vector3
+
+            intent = PlacementIntent(
+                asset_path=asset_path,
+                location=Vector3(x=location_x, y=location_y, z=location_z),
+                rotation=Rotation3(pitch=rotation_pitch, yaw=rotation_yaw, roll=rotation_roll),
+                scale=Vector3(x=scale_x, y=scale_y, z=scale_z),
+                constraints=SpatialConstraints(snap_to_surface=True),
+            )
+            _validator = SpawnValidator(client, OCCUPANCY_GRID)
+            val_result = await _validator.validate(intent)
+            if not val_result.success:
+                return client.format_json(
+                    {
+                        **_error("spawn_actor", f"Spatial validation failed: {val_result.rejection_reason}"),
+                        "validation_detail": val_result.to_summary(),
+                    }
+                )
+            # Use the adjusted (ground-snapped) location and rotation
+            adj = val_result.adjusted_location
+            adj_rot = val_result.adjusted_rotation
+            location = adj.to_dict()
+            rotation = adj_rot.to_dict()
 
         try:
             result = await client.spawn_actor(asset_path, location, rotation, scale)
@@ -150,6 +188,11 @@ def register_environment_tools(mcp: FastMCP, client: UEClient) -> None:
                 **result,
                 "spawned_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             }
+            if validate:
+                payload["validated"] = True
+                payload["note"] = (
+                    "Use spawn_actor_safe for full validated placement with grid tracking."
+                )
             return client.format_json(payload)
         except UEConnectionError as exc:
             return client.format_json(_error("spawn_actor", str(exc)))
@@ -221,18 +264,34 @@ def register_environment_tools(mcp: FastMCP, client: UEClient) -> None:
             "If true, return a description of what would be deleted without "
             "actually deleting it. Recommended before destructive operations.",
         ] = False,
+        grid_label: Annotated[
+            str,
+            "The occupancy grid label for this actor, if it was spawned via "
+            "spawn_actor_safe. Returned as 'label' in the spawn result. "
+            "If omitted, the actor_name is used as the grid key (works when "
+            "the label was set to match the actor name).",
+        ] = "",
     ) -> str:
         """Delete an actor from the current level.
 
         This is a destructive operation.  Use dry_run=true first to confirm
-        you have the correct actor.  A future confirm=true parameter will be
-        added as part of the safety layer to prevent accidental deletions.
+        you have the correct actor.
+
+        If the actor was spawned via spawn_actor_safe, pass the 'label' value
+        from that result as grid_label so the occupancy grid is correctly
+        updated.
 
         Returns a deletion summary including the actor name and whether the
         operation succeeded.
         """
         try:
             result = await client.delete_actor(actor_name, dry_run=dry_run)
+            # Release grid entry on confirmed deletion (not on dry_run).
+            # Try explicit grid_label first, then fall back to actor_name.
+            if result.get("success") and result.get("deleted") and not dry_run:
+                freed = OCCUPANCY_GRID.mark_free(grid_label or actor_name)
+                if not freed and grid_label:
+                    OCCUPANCY_GRID.mark_free(actor_name)
             return client.format_json(result)
         except UEConnectionError as exc:
             return client.format_json(_error("delete_actor", str(exc)))
@@ -589,6 +648,27 @@ def register_environment_tools(mcp: FastMCP, client: UEClient) -> None:
             bool,
             "Randomise Z-axis (yaw) rotation for each instance. Default true.",
         ] = True,
+        use_spatial_validation: Annotated[
+            bool,
+            "Check occupancy grid and snap each instance to ground before placing. "
+            "Skips candidates that overlap existing grid entries. "
+            "Default false — set true when populating a scene with other actors present.",
+        ] = False,
+        min_spacing_cm: Annotated[
+            float,
+            "Minimum clearance radius between foliage instances (cm). "
+            "Only used when use_spatial_validation=true. Default 50.",
+        ] = 50.0,
+        max_slope_deg: Annotated[
+            float,
+            "Reject instance placement on surfaces steeper than this angle. "
+            "Only used when use_spatial_validation=true. Default 45.",
+        ] = 45.0,
+        max_retries_per_instance: Annotated[
+            int,
+            "How many random positions to try for each instance before giving up. "
+            "Only used when use_spatial_validation=true. Default 10.",
+        ] = 10,
     ) -> str:
         """Place foliage instances across a region of the world.
 
@@ -596,34 +676,168 @@ def register_environment_tools(mcp: FastMCP, client: UEClient) -> None:
         grass, or any StaticMesh asset.  Density and area bounds determine how
         many instances are placed and where.
 
+        Set use_spatial_validation=true to enable:
+          • Occupancy grid overlap check (respects already-placed actors)
+          • Ground snap via line trace (align_to_normal now fully implemented)
+          • Slope rejection (max_slope_deg)
+          • Structured placement report: {spawned, skipped, skip_reasons}
+
         Example: place 500 pine trees across a 200×200m forest:
           mesh_path='/Game/Environment/SM_PineTree'
           density=50, area 0–20000 in both axes, scale_min=0.8, scale_max=1.4
 
-        Placement statistics are returned so the AI can report exactly how
-        many instances were created.
-
         Requires: FoliageEdit module enabled.  Python Script Plugin for live mode.
         """
+        import random as _random
+        import math as _math
+
+        area_min = {"x": area_min_x, "y": area_min_y}
+        area_max = {"x": area_max_x, "y": area_max_y}
+
+        if not use_spatial_validation:
+            # Original fast path — no grid involvement
+            try:
+                result = await client.spawn_foliage(
+                    mesh_path=mesh_path,
+                    density=density,
+                    area_min=area_min,
+                    area_max=area_max,
+                    scale_min=scale_min,
+                    scale_max=scale_max,
+                    seed=seed,
+                    align_to_normal=align_to_normal,
+                    random_yaw=random_yaw,
+                )
+                payload: dict[str, Any] = {
+                    **result,
+                    "placed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                }
+                return client.format_json(payload)
+            except UEConnectionError as exc:
+                return client.format_json(_error("spawn_foliage", str(exc)))
+
+        # ------------------------------------------------------------------
+        # Validated path — grid-aware per-instance placement
+        # ------------------------------------------------------------------
+        area_x = abs(area_max_x - area_min_x)
+        area_y = abs(area_max_y - area_min_y)
+        area_m2 = (area_x * area_y) / (100 * 100)
+        rng = _random.Random(seed)
+        target_count = max(1, int(area_m2 * density / 100))
+
+        # Resolve asset extent once
         try:
-            result = await client.spawn_foliage(
-                mesh_path=mesh_path,
-                density=density,
-                area_min={"x": area_min_x, "y": area_min_y},
-                area_max={"x": area_max_x, "y": area_max_y},
-                scale_min=scale_min,
-                scale_max=scale_max,
-                seed=seed,
-                align_to_normal=align_to_normal,
-                random_yaw=random_yaw,
-            )
-            payload: dict[str, Any] = {
-                **result,
+            bounds_raw = await client.get_asset_static_mesh_bounds(mesh_path)
+            raw_ext = bounds_raw.get("extent", {})
+            base_radius = max(
+                float(raw_ext.get("X", 100.0)),
+                float(raw_ext.get("Y", 100.0)),
+            ) + min_spacing_cm
+        except Exception:
+            base_radius = 100.0 + min_spacing_cm
+
+        from ue5_mcp.spatial.schema import Vector3
+
+        spawned_count = 0
+        skipped_count = 0
+        skip_reasons: dict[str, int] = {"overlap": 0, "slope": 0, "trace_fail": 0}
+
+        for _ in range(target_count):
+            placed = False
+            for _retry in range(max_retries_per_instance):
+                cx = rng.uniform(area_min_x, area_max_x)
+                cy = rng.uniform(area_min_y, area_max_y)
+                scale_val = rng.uniform(scale_min, scale_max)
+                eff_radius = base_radius * scale_val
+
+                candidate = Vector3(x=cx, y=cy, z=0.0)
+
+                # Occupancy grid check
+                if not OCCUPANCY_GRID.is_region_free(candidate, eff_radius):
+                    skip_reasons["overlap"] += 1
+                    continue
+
+                # Ground snap + slope check
+                actual_z = 0.0
+                pitch_deg = 0.0
+                roll_deg = 0.0
+                try:
+                    trace = await client.line_trace_surface(cx, cy, 10000.0)
+                    if trace.get("hit"):
+                        hit_loc = trace.get("location", {})
+                        actual_z = float(hit_loc.get("Z", 0.0))
+                        normal = trace.get("normal", {"X": 0, "Y": 0, "Z": 1})
+                        nz = float(normal.get("Z", 1.0))
+                        slope = _math.degrees(_math.acos(max(-1.0, min(1.0, nz))))
+                        if slope > max_slope_deg:
+                            skip_reasons["slope"] += 1
+                            continue
+                        if align_to_normal:
+                            nx = float(normal.get("X", 0.0))
+                            ny = float(normal.get("Y", 0.0))
+                            pitch_deg = _math.degrees(_math.atan2(-nx, nz))
+                            roll_deg = _math.degrees(_math.atan2(-ny, nz))
+                except Exception:
+                    skip_reasons["trace_fail"] += 1
+
+                yaw_deg = rng.uniform(0, 360) if random_yaw else 0.0
+
+                # Build foliage transform and add via execute_python
+                _ifa_fn = "get_instanced_foliage_actor_for_current_level"
+                python_cmd = (
+                    "import unreal; "
+                    f"mesh = unreal.load_asset('{mesh_path}'); "
+                    "world = unreal.UnrealEditorSubsystem().get_editor_world(); "
+                    f"ifa = unreal.InstancedFoliageActor.{_ifa_fn}(world, True); "
+                    "ft = ifa.get_local_foliage_type_for_source(mesh) or ifa.add_mesh(mesh); "
+                    f"t = unreal.Transform("
+                    f"location=unreal.Vector({cx},{cy},{actual_z}), "
+                    f"rotation=unreal.Rotator({pitch_deg},{yaw_deg},{roll_deg}), "
+                    f"scale=unreal.Vector({scale_val},{scale_val},{scale_val})); "
+                    "ifa.add_instances(world, ft, [t])"
+                )
+                try:
+                    await client.execute_python(python_cmd)
+                except Exception:
+                    skip_reasons["trace_fail"] += 1
+                    continue
+
+                # Mark grid
+                placed_center = Vector3(x=cx, y=cy, z=actual_z)
+                from ue5_mcp.spatial.schema import Vector3 as _V3
+                placed_extent = _V3(
+                    x=float(bounds_raw.get("extent", {}).get("X", 100.0)) * scale_val,
+                    y=float(bounds_raw.get("extent", {}).get("Y", 100.0)) * scale_val,
+                    z=float(bounds_raw.get("extent", {}).get("Z", 100.0)) * scale_val,
+                )
+                import uuid as _uuid
+                mesh_name = mesh_path.split("/")[-1].split(".")[0]
+                instance_label = f"{mesh_name}_{_uuid.uuid4().hex[:6]}"
+                try:
+                    OCCUPANCY_GRID.mark_occupied(instance_label, placed_center, placed_extent)
+                except ValueError:
+                    pass
+
+                spawned_count += 1
+                placed = True
+                break
+
+            if not placed:
+                skipped_count += 1
+
+        return client.format_json(
+            {
+                "success": True,
+                "mesh_path": mesh_path,
+                "target_count": target_count,
+                "spawned": spawned_count,
+                "skipped": skipped_count,
+                "skip_reasons": {k: v for k, v in skip_reasons.items() if v > 0},
+                "area_bounds": {"min": area_min, "max": area_max},
+                "use_spatial_validation": True,
                 "placed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             }
-            return client.format_json(payload)
-        except UEConnectionError as exc:
-            return client.format_json(_error("spawn_foliage", str(exc)))
+        )
 
     @mcp.tool()
     async def clear_foliage(

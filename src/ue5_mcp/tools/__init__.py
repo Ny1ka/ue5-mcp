@@ -5,12 +5,14 @@ from ue5_mcp.tools.blueprints import register_blueprint_tools
 from ue5_mcp.tools.debugging import register_debugging_tools
 from ue5_mcp.tools.editor import register_editor_tools
 from ue5_mcp.tools.environment import register_environment_tools
+from ue5_mcp.tools.spatial import register_spatial_tools
 from ue5_mcp.tools.testing import register_testing_tools
 
 __all__ = [
     "register_editor_tools",
     "register_asset_tools",
     "register_environment_tools",
+    "register_spatial_tools",
     "register_blueprint_tools",
     "register_debugging_tools",
     "register_testing_tools",
