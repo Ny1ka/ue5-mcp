@@ -198,12 +198,12 @@ Static Meshes · Skeletal Meshes · Skeletons · Physics Assets · Materials · 
 
 > **Let the AI place, configure, and modify things in the world.**
 
-These tools connect Claude directly to level editing tasks — the kinds of things that take hours of manual work.  All 19 tools work in mock mode (`UE_MOCK_MODE=true`) with no live editor required.
+These tools connect Claude directly to level editing tasks — the kinds of things that take hours of manual work.  All 25 tools work in mock mode (`UE_MOCK_MODE=true`) with no live editor required.
 
 ### Architecture
 
 ```
-tools/environment.py          ← 19 MCP tool definitions
+tools/environment.py          ← 25 MCP tool definitions
 bridge/client.py              ← UE Remote Control API calls + mock implementations
 ```
 
@@ -399,6 +399,56 @@ Foliage removal, LOD threshold configuration, and collision generation.  All ret
 Landscape weight painting and PCG graph parameter updates.  Both tools return affected area / parameter diff for confirmation before committing.
 
 > **Live mode note:** Full landscape weight painting requires either the Python Script Plugin (partial support) or a custom C++ editor plugin for precise control.  The tool is designed to be upgraded with better APIs without breaking the MCP interface.
+
+---
+
+### Phase 5 · Splines, Roads & Structure Composition
+
+#### `list_structure_templates`, `build_structure`
+
+`build_structure` assembles a named preset (`cabin`, `house_small`, `house_large`, `warehouse`, `tower`, `wall_segment`, `archway`) from `templates/structure_templates.json` — spawning every component at its offset/rotation/scale relative to the structure's origin, snapping the origin to ground, and registering the whole footprint as one oriented bounding box in the occupancy grid. `list_structure_templates` returns every preset's footprint and component ids/categories so the AI knows what it can override.
+
+```json
+{
+  "success": true,
+  "structure_type": "cabin",
+  "label": "cabin_a1b2c3",
+  "origin": {"x": 0.0, "y": 0.0, "z": 0.0},
+  "components_spawned": 7,
+  "components_failed": 0,
+  "grid_registered": true
+}
+```
+
+Every `default_asset` baked into the template is a placeholder — pass `component_overrides` (JSON: component id or category → real `/Game/...` path) to point components at meshes that exist in your project.
+
+**Example prompts:**
+
+```
+"Build a small wooden cabin at (2000, 1500, 0)."
+"Place a warehouse, rotated 45 degrees, using my own wall and roof meshes."
+```
+
+#### `create_spline_actor`, `add_spline_mesh`, `create_road_segment`
+
+`create_spline_actor` places a spline through an array of control points; `add_spline_mesh` tiles a StaticMesh along every segment. `create_road_segment` is the higher-level wrapper — start point, end point, and width in, a ground-snapped spline with a tiled road mesh (and optional lane-marking mesh) out — and registers the segment as an oriented bounding box in the occupancy grid so structures won't be placed on top of it.
+
+```json
+{
+  "success": true,
+  "label": "Road_9f3a21",
+  "length_cm": 2000.0,
+  "width_cm": 500.0,
+  "grid_registered": true
+}
+```
+
+**Example prompts:**
+
+```
+"Connect these two buildings with a road."
+"Lay out a fence along this property boundary using SM_FencePanel."
+```
 
 ---
 
@@ -642,7 +692,7 @@ ue5-mcp/
 │   ├── tools/
 │   │   ├── editor.py                 # ue_ping, ue_get_editor_info
 │   │   ├── assets.py                 # list_project_assets, list_asset_categories
-│   │   ├── environment.py            # 19 Layer 2 tools + splines/roads/scatter (in dev)
+│   │   ├── environment.py            # 19 Layer 2 tools + splines/roads/structures (Session 3 done, scatter in dev)
 │   │   ├── blueprints.py             # 8 Layer 3 tools (create, variables, events, compile)
 │   │   ├── debugging.py              # 15 Layer 4 tools (collision, perf, logs, validation)
 │   │   ├── testing.py                # 12 Layer 5 tools (automation, PIE, headless builds)
@@ -656,11 +706,11 @@ ue5-mcp/
 │   │   └── workflows.py              # explore_level, prototype_gameplay + build workflows (in dev)
 │   └── templates/
 │       ├── environment_profiles.json # 🔄 asset palettes per biome (in dev)
-│       └── structure_templates.json  # 🔄 mesh component lists per structure type (in dev)
+│       └── structure_templates.json  # ✅ mesh component lists per structure type (cabin, house, warehouse, tower, wall, archway)
 └── tests/
     ├── test_server.py                # Layer 1 registry, scanner, UI endpoints
     ├── test_environment.py           # Layer 2 environment tools (97 tests)
-    └── test_environment_v2.py        # 🔄 Environment Building System tests (in dev)
+    └── test_structure_composition.py # ✅ splines, roads, and build_structure tools (27 tests)
 ```
 
 ---
@@ -779,7 +829,7 @@ Lighting is what separates a forest at dawn from harsh noon light. Every environ
 
 ---
 
-**Session 3 · Splines, Roads & Structure Composition** (extend `tools/environment.py`)
+**Session 3 · Splines, Roads & Structure Composition** (extend `tools/environment.py`) — *Done*
 
 The difference between a city and a cluster of buildings is connected roads and assembled structures.
 
@@ -787,11 +837,12 @@ The difference between a city and a cluster of buildings is connected roads and 
 |------|-------------|
 | `create_spline_actor` | Place a spline actor with an array of control points |
 | `add_spline_mesh` | Tile a mesh asset along a spline (roads, fences, rivers, walls) |
-| `create_road_segment` | Higher-level: start + end + width + material → spline, mesh, and lane markings |
-| `build_structure` | Assemble a structure from component meshes: `cabin`, `warehouse`, `tower`, `wall_segment`, `archway` |
-| `create_zone_boundary` | Place invisible blocking volumes and a named outliner folder for a defined zone |
+| `create_road_segment` | Higher-level: start + end + width + mesh → spline, tiled road mesh, and optional lane markings |
+| `list_structure_templates` | Discover available structure presets, their footprint, and overridable component ids/categories |
+| `build_structure` | Assemble a structure from component meshes: `cabin`, `house_small`, `house_large`, `warehouse`, `tower`, `wall_segment`, `archway` |
+| `create_zone_boundary` | 🔲 Not yet implemented — place invisible blocking volumes and a named outliner folder for a defined zone |
 
-`build_structure` consumes a `structure_templates.json` config that maps each type to a list of mesh asset paths and their relative offsets — this is what turns "place a wooden cabin" into a real composed object.
+`build_structure` consumes `templates/structure_templates.json`, which maps each structure type to a list of mesh components and their relative offset/rotation/scale. Every default `default_asset` path in that file is a **placeholder** — pass `component_overrides` (component id or category → real `/Game/...` path, found via `list_project_assets`) to point components at meshes that actually exist in your project. Both `build_structure` and `create_road_segment` register their footprint in the occupancy grid as an oriented bounding box, so later `spawn_actor_safe` / `build_structure` / `create_road_segment` calls won't collide with them.
 
 ---
 

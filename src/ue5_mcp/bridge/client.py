@@ -3550,6 +3550,148 @@ class UEClient:
             "python_result": result,
         }
 
+    async def create_spline_actor(
+        self,
+        points: list[dict[str, float]],
+        closed_loop: bool = False,
+        label: str = "",
+    ) -> dict[str, Any]:
+        """Spawn an empty Actor carrying a SplineComponent through the given points.
+
+        Used as the foundation for roads, fences, rivers, and walls — any
+        feature that needs a mesh tiled along a path.  The returned actor
+        name/path is passed into add_spline_mesh to tile a mesh along it.
+
+        Args:
+            points:      World-space control points, each {"x", "y", "z"} (cm).
+            closed_loop: If True, the spline connects its last point back to
+                         the first.
+            label:       Optional actor label. Auto-generated if empty.
+
+        Returns:
+            {"spline_actor": str, "object_path": str, "points": [...],
+             "closed_loop": bool, "num_points": int}
+        """
+        name = label or f"SplineActor_{random.randint(100000, 999999)}"
+
+        if self.is_mock:
+            return {
+                "mock": True,
+                "spline_actor": name,
+                "object_path": f"/Game/Maps/L_TestLevel.L_TestLevel:PersistentLevel.{name}",
+                "points": points,
+                "closed_loop": closed_loop,
+                "num_points": len(points),
+            }
+
+        point_literals = ", ".join(
+            f"unreal.Vector({p['x']}, {p['y']}, {p['z']})" for p in points
+        )
+        python_cmd = (
+            "import unreal, json; "
+            "world = unreal.UnrealEditorSubsystem().get_editor_world(); "
+            "actor = unreal.EditorLevelLibrary.spawn_actor_from_class("
+            "unreal.Actor, unreal.Vector(0,0,0)); "
+            f"actor.set_actor_label({json.dumps(name)}); "
+            "spline = actor.add_component_by_class(unreal.SplineComponent); "
+            f"pts = [{point_literals}]; "
+            "spline.set_spline_points(pts, unreal.SplinePointType.CURVE, True); "
+            f"spline.set_closed_loop({closed_loop}); "
+            "print(json.dumps({'object_path': actor.get_path_name()}))"
+        )
+        result = await self.execute_python(python_cmd)
+        object_path = result.get("object_path", "")
+        return {
+            "spline_actor": name,
+            "object_path": object_path,
+            "points": points,
+            "closed_loop": closed_loop,
+            "num_points": len(points),
+            "python_result": result,
+        }
+
+    async def add_spline_mesh(
+        self,
+        spline_actor: str,
+        mesh_path: str,
+        start_scale: dict[str, float],
+        end_scale: dict[str, float],
+    ) -> dict[str, Any]:
+        """Tile a StaticMesh along every segment of a spline actor's spline.
+
+        For each pair of consecutive spline points, adds one SplineMeshComponent
+        whose start/end position and tangent are read from the spline itself,
+        so the mesh follows curves as well as straight segments.
+
+        Args:
+            spline_actor: Actor name/label returned by create_spline_actor.
+            mesh_path:    Full /Game/... path to the StaticMesh to tile.
+            start_scale:  Cross-section scale {"x", "y"} at each segment start.
+            end_scale:    Cross-section scale {"x", "y"} at each segment end.
+
+        Returns:
+            {"spline_actor": str, "mesh_path": str, "segments_tiled": int, "success": bool}
+        """
+        if self.is_mock:
+            return {
+                "mock": True,
+                "spline_actor": spline_actor,
+                "mesh_path": mesh_path,
+                "start_scale": start_scale,
+                "end_scale": end_scale,
+                "segments_tiled": 1,
+                "success": True,
+                "note": (
+                    "Mock mode — segment count depends on the live spline's "
+                    "point count and is not tracked server-side."
+                ),
+            }
+
+        # NOTE: every statement below is newline-separated (never ';'-joined
+        # with a following compound statement) — mixing the two is invalid
+        # Python grammar and silently breaks this command at UE's Python
+        # interpreter. String values are embedded via json.dumps() so labels
+        # and asset paths containing quotes can't corrupt the generated source.
+        script_lines = [
+            "import unreal, json",
+            f"mesh = unreal.load_asset({json.dumps(mesh_path)})",
+            "actor = None",
+            "for a in unreal.EditorLevelLibrary.get_all_level_actors():",
+            f"    if a.get_actor_label() == {json.dumps(spline_actor)}:",
+            "        actor = a",
+            "        break",
+            "spline = actor.get_component_by_class(unreal.SplineComponent) if actor else None",
+            "tiled = 0",
+            "SC = unreal.SplineCoordinateSpace.LOCAL",
+            "if spline:",
+            "    n = spline.get_number_of_spline_points()",
+            "    last = n if spline.is_closed_loop() else n - 1",
+            "    for i in range(max(0, last)):",
+            "        smc = actor.add_component_by_class(unreal.SplineMeshComponent)",
+            "        smc.set_static_mesh(mesh)",
+            "        s_loc = spline.get_location_at_spline_point(i, SC)",
+            "        s_tan = spline.get_tangent_at_spline_point(i, SC)",
+            "        j = (i + 1) % n",
+            "        e_loc = spline.get_location_at_spline_point(j, SC)",
+            "        e_tan = spline.get_tangent_at_spline_point(j, SC)",
+            "        smc.set_start_and_end(s_loc, s_tan, e_loc, e_tan, True)",
+            f"        sv = unreal.Vector2D({start_scale['x']}, {start_scale['y']})",
+            f"        ev = unreal.Vector2D({end_scale['x']}, {end_scale['y']})",
+            "        smc.set_start_scale(sv, True)",
+            "        smc.set_end_scale(ev, True)",
+            "        tiled += 1",
+            "print(json.dumps({'segments_tiled': tiled, 'found_actor': actor is not None}))",
+        ]
+        python_cmd = "\n".join(script_lines)
+        result = await self.execute_python(python_cmd)
+        return {
+            "spline_actor": spline_actor,
+            "mesh_path": mesh_path,
+            "segments_tiled": result.get("segments_tiled", 0),
+            "success": bool(result.get("found_actor")),
+            "python_result": result,
+        }
+
     async def flush_debug_geometry(self) -> dict[str, Any]:
         """Clear all persistent debug lines, boxes, and strings from the viewport.
 

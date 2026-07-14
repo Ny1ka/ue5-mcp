@@ -1,0 +1,99 @@
+{
+  "cabin": {
+    "display_name": "Wooden Cabin",
+    "description": "Small single-room wooden cabin with a pitched roof and one door.",
+    "footprint_cm": { "x": 500, "y": 400, "z": 400 },
+    "components": [
+      { "id": "floor", "category": "floor", "default_asset": "/Game/StarterContent/Architecture/Floor_400x400", "offset": { "x": 0, "y": 0, "z": 0 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 1.25, "y": 1.0, "z": 1.0 } },
+      { "id": "wall_north", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 0, "y": 200, "z": 150 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 1.25, "y": 1.0, "z": 1.0 } },
+      { "id": "wall_south", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 0, "y": -200, "z": 150 }, "rotation": { "pitch": 0, "yaw": 180, "roll": 0 }, "scale": { "x": 1.25, "y": 1.0, "z": 1.0 } },
+      { "id": "wall_east", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 250, "y": 0, "z": 150 }, "rotation": { "pitch": 0, "yaw": 90, "roll": 0 }, "scale": { "x": 1.0, "y": 1.0, "z": 1.0 } },
+      { "id": "wall_west", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": -250, "y": 0, "z": 150 }, "rotation": { "pitch": 0, "yaw": 270, "roll": 0 }, "scale": { "x": 1.0, "y": 1.0, "z": 1.0 } },
+      { "id": "door", "category": "door", "default_asset": "/Game/StarterContent/Props/Door_Wood", "offset": { "x": -250, "y": -50, "z": 50 }, "rotation": { "pitch": 0, "yaw": 270, "roll": 0 }, "scale": { "x": 1.0, "y": 1.0, "z": 1.0 } },
+      { "id": "roof", "category": "roof", "default_asset": "/Game/StarterContent/Architecture/Roof_Pitched_400x400", "offset": { "x": 0, "y": 0, "z": 320 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 1.25, "y": 1.0, "z": 1.0 } }
+    ]
+  },
+  "house_small": {
+    "display_name": "Small House",
+    "description": "One-storey house with a door and two windows, suitable for suburban or village scenes.",
+    "footprint_cm": { "x": 600, "y": 500, "z": 450 },
+    "components": [
+      { "id": "floor", "category": "floor", "default_asset": "/Game/StarterContent/Architecture/Floor_400x400", "offset": { "x": 0, "y": 0, "z": 0 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 1.5, "y": 1.25, "z": 1.0 } },
+      { "id": "wall_front", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": -300, "y": 0, "z": 175 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 1.0, "y": 1.25, "z": 1.17 } },
+      { "id": "wall_back", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 300, "y": 0, "z": 175 }, "rotation": { "pitch": 0, "yaw": 180, "roll": 0 }, "scale": { "x": 1.0, "y": 1.25, "z": 1.17 } },
+      { "id": "wall_left", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 0, "y": -250, "z": 175 }, "rotation": { "pitch": 0, "yaw": 90, "roll": 0 }, "scale": { "x": 1.0, "y": 1.5, "z": 1.17 } },
+      { "id": "wall_right", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 0, "y": 250, "z": 175 }, "rotation": { "pitch": 0, "yaw": 270, "roll": 0 }, "scale": { "x": 1.0, "y": 1.5, "z": 1.17 } },
+      { "id": "door", "category": "door", "default_asset": "/Game/StarterContent/Props/Door_Wood", "offset": { "x": -300, "y": -60, "z": 55 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 1.0, "y": 1.0, "z": 1.0 } },
+      { "id": "window_left", "category": "window", "default_asset": "/Game/StarterContent/Props/Window_100x100", "offset": { "x": 0, "y": -250, "z": 200 }, "rotation": { "pitch": 0, "yaw": 90, "roll": 0 }, "scale": { "x": 1.0, "y": 1.0, "z": 1.0 } },
+      { "id": "window_right", "category": "window", "default_asset": "/Game/StarterContent/Props/Window_100x100", "offset": { "x": 0, "y": 250, "z": 200 }, "rotation": { "pitch": 0, "yaw": 270, "roll": 0 }, "scale": { "x": 1.0, "y": 1.0, "z": 1.0 } },
+      { "id": "roof", "category": "roof", "default_asset": "/Game/StarterContent/Architecture/Roof_Pitched_400x400", "offset": { "x": 0, "y": 0, "z": 350 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 1.5, "y": 1.25, "z": 1.0 } }
+    ]
+  },
+  "house_large": {
+    "display_name": "Large Two-Storey House",
+    "description": "Two-storey house with a ground and upper floor wall ring, a door, two windows, and a pitched roof.",
+    "footprint_cm": { "x": 700, "y": 600, "z": 750 },
+    "components": [
+      { "id": "floor_ground", "category": "floor", "default_asset": "/Game/StarterContent/Architecture/Floor_400x400", "offset": { "x": 0, "y": 0, "z": 0 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 1.75, "y": 1.5, "z": 1.0 } },
+      { "id": "wall_front_ground", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": -350, "y": 0, "z": 175 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 1.0, "y": 1.5, "z": 1.17 } },
+      { "id": "wall_back_ground", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 350, "y": 0, "z": 175 }, "rotation": { "pitch": 0, "yaw": 180, "roll": 0 }, "scale": { "x": 1.0, "y": 1.5, "z": 1.17 } },
+      { "id": "wall_left_ground", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 0, "y": -300, "z": 175 }, "rotation": { "pitch": 0, "yaw": 90, "roll": 0 }, "scale": { "x": 1.0, "y": 1.75, "z": 1.17 } },
+      { "id": "wall_right_ground", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 0, "y": 300, "z": 175 }, "rotation": { "pitch": 0, "yaw": 270, "roll": 0 }, "scale": { "x": 1.0, "y": 1.75, "z": 1.17 } },
+      { "id": "floor_upper", "category": "floor", "default_asset": "/Game/StarterContent/Architecture/Floor_400x400", "offset": { "x": 0, "y": 0, "z": 350 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 1.75, "y": 1.5, "z": 1.0 } },
+      { "id": "wall_front_upper", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": -350, "y": 0, "z": 525 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 1.0, "y": 1.5, "z": 1.17 } },
+      { "id": "wall_back_upper", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 350, "y": 0, "z": 525 }, "rotation": { "pitch": 0, "yaw": 180, "roll": 0 }, "scale": { "x": 1.0, "y": 1.5, "z": 1.17 } },
+      { "id": "wall_left_upper", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 0, "y": -300, "z": 525 }, "rotation": { "pitch": 0, "yaw": 90, "roll": 0 }, "scale": { "x": 1.0, "y": 1.75, "z": 1.17 } },
+      { "id": "wall_right_upper", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 0, "y": 300, "z": 525 }, "rotation": { "pitch": 0, "yaw": 270, "roll": 0 }, "scale": { "x": 1.0, "y": 1.75, "z": 1.17 } },
+      { "id": "door", "category": "door", "default_asset": "/Game/StarterContent/Props/Door_Wood", "offset": { "x": -350, "y": -60, "z": 55 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 1.0, "y": 1.0, "z": 1.0 } },
+      { "id": "window_a", "category": "window", "default_asset": "/Game/StarterContent/Props/Window_100x100", "offset": { "x": 0, "y": -300, "z": 200 }, "rotation": { "pitch": 0, "yaw": 90, "roll": 0 }, "scale": { "x": 1.0, "y": 1.0, "z": 1.0 } },
+      { "id": "window_b", "category": "window", "default_asset": "/Game/StarterContent/Props/Window_100x100", "offset": { "x": 0, "y": 300, "z": 575 }, "rotation": { "pitch": 0, "yaw": 270, "roll": 0 }, "scale": { "x": 1.0, "y": 1.0, "z": 1.0 } },
+      { "id": "roof", "category": "roof", "default_asset": "/Game/StarterContent/Architecture/Roof_Pitched_400x400", "offset": { "x": 0, "y": 0, "z": 700 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 1.75, "y": 1.5, "z": 1.0 } }
+    ]
+  },
+  "warehouse": {
+    "display_name": "Industrial Warehouse",
+    "description": "Large single-volume industrial building with a flat roof and a wide loading door.",
+    "footprint_cm": { "x": 1200, "y": 800, "z": 600 },
+    "components": [
+      { "id": "floor", "category": "floor", "default_asset": "/Game/StarterContent/Architecture/Floor_400x400", "offset": { "x": 0, "y": 0, "z": 0 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 3.0, "y": 2.0, "z": 1.0 } },
+      { "id": "wall_front", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": -600, "y": 0, "z": 250 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 1.0, "y": 2.0, "z": 1.67 } },
+      { "id": "wall_back", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 600, "y": 0, "z": 250 }, "rotation": { "pitch": 0, "yaw": 180, "roll": 0 }, "scale": { "x": 1.0, "y": 2.0, "z": 1.67 } },
+      { "id": "wall_left", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 0, "y": -400, "z": 250 }, "rotation": { "pitch": 0, "yaw": 90, "roll": 0 }, "scale": { "x": 1.0, "y": 3.0, "z": 1.67 } },
+      { "id": "wall_right", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 0, "y": 400, "z": 250 }, "rotation": { "pitch": 0, "yaw": 270, "roll": 0 }, "scale": { "x": 1.0, "y": 3.0, "z": 1.67 } },
+      { "id": "loading_door", "category": "door", "default_asset": "/Game/StarterContent/Props/Door_Wood", "offset": { "x": -600, "y": -200, "z": 175 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 1.0, "y": 2.0, "z": 1.5 } },
+      { "id": "roof", "category": "roof", "default_asset": "/Game/StarterContent/Architecture/Roof_Flat_400x400", "offset": { "x": 0, "y": 0, "z": 500 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 3.0, "y": 2.0, "z": 1.0 } }
+    ]
+  },
+  "tower": {
+    "display_name": "Watchtower",
+    "description": "Tall thin tower assembled from stacked shaft segments with a platform and roof spike.",
+    "footprint_cm": { "x": 300, "y": 300, "z": 900 },
+    "components": [
+      { "id": "base", "category": "tower_wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 0, "y": 0, "z": 150 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 0.75, "y": 0.75, "z": 1.0 } },
+      { "id": "shaft_mid", "category": "tower_wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 0, "y": 0, "z": 450 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 0.75, "y": 0.75, "z": 1.0 } },
+      { "id": "shaft_top", "category": "tower_wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 0, "y": 0, "z": 750 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 0.75, "y": 0.75, "z": 1.0 } },
+      { "id": "platform", "category": "floor", "default_asset": "/Game/StarterContent/Architecture/Floor_400x400", "offset": { "x": 0, "y": 0, "z": 850 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 0.9, "y": 0.9, "z": 1.0 } },
+      { "id": "roof_spike", "category": "roof", "default_asset": "/Game/StarterContent/Architecture/Roof_Pitched_400x400", "offset": { "x": 0, "y": 0, "z": 900 }, "rotation": { "pitch": 0, "yaw": 45, "roll": 0 }, "scale": { "x": 0.75, "y": 0.75, "z": 1.2 } }
+    ]
+  },
+  "wall_segment": {
+    "display_name": "Perimeter Wall Segment",
+    "description": "Single fence/perimeter wall panel with two corner posts — repeat and chain end-to-end to build longer walls.",
+    "footprint_cm": { "x": 400, "y": 50, "z": 300 },
+    "components": [
+      { "id": "post_left", "category": "support", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": -190, "y": 0, "z": 150 }, "rotation": { "pitch": 0, "yaw": 90, "roll": 0 }, "scale": { "x": 0.15, "y": 1.0, "z": 1.0 } },
+      { "id": "panel", "category": "wall", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 0, "y": 0, "z": 150 }, "rotation": { "pitch": 0, "yaw": 0, "roll": 0 }, "scale": { "x": 1.0, "y": 0.5, "z": 1.0 } },
+      { "id": "post_right", "category": "support", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 190, "y": 0, "z": 150 }, "rotation": { "pitch": 0, "yaw": 90, "roll": 0 }, "scale": { "x": 0.15, "y": 1.0, "z": 1.0 } }
+    ]
+  },
+  "archway": {
+    "display_name": "Stone Archway",
+    "description": "Gateway arch made of two pillars and a connecting top piece — good for city gates and zone entrances.",
+    "footprint_cm": { "x": 400, "y": 100, "z": 500 },
+    "components": [
+      { "id": "pillar_left", "category": "arch_pillar", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": -150, "y": 0, "z": 200 }, "rotation": { "pitch": 0, "yaw": 90, "roll": 0 }, "scale": { "x": 0.25, "y": 1.33, "z": 1.0 } },
+      { "id": "pillar_right", "category": "arch_pillar", "default_asset": "/Game/StarterContent/Architecture/Wall_400x300", "offset": { "x": 150, "y": 0, "z": 200 }, "rotation": { "pitch": 0, "yaw": 90, "roll": 0 }, "scale": { "x": 0.25, "y": 1.33, "z": 1.0 } },
+      { "id": "arch_top", "category": "arch_top", "default_asset": "/Game/StarterContent/Architecture/Roof_Flat_400x400", "offset": { "x": 0, "y": 0, "z": 420 }, "rotation": { "pitch": 0, "yaw": 90, "roll": 0 }, "scale": { "x": 0.25, "y": 1.0, "z": 0.2 } }
+    ]
+  }
+}

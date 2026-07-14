@@ -31,7 +31,11 @@ mcp = FastMCP(
         "occupancy, snaps to ground, checks slope, and tracks every actor so nothing "
         "overlaps. Use validate_spawn for a dry-run check before committing. "
         "Use show_occupancy_debug to visualise occupied cells and preview_spawn to "
-        "preview placement without spawning."
+        "preview placement without spawning. "
+        "For assembled structures (cabins, houses, warehouses, towers), call "
+        "list_structure_templates then build_structure instead of spawning "
+        "components one at a time. For roads, fences, or rivers, use "
+        "create_road_segment or create_spline_actor + add_spline_mesh."
     ),
 )
 

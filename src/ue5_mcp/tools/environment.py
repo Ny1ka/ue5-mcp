@@ -17,6 +17,10 @@ into four functional groups that mirror the Layer 2 roadmap:
   Phase 4 · Landscape & PCG Foundation
     list_landscape_layers, paint_landscape_layer, configure_pcg_graph
 
+  Phase 5 · Splines, Roads & Structure Composition
+    create_spline_actor, add_spline_mesh, create_road_segment,
+    list_structure_templates, build_structure
+
 Every tool:
   • Works in mock mode (UE_MOCK_MODE=true) — no live editor required
   • Returns structured, JSON-serialisable data via client.format_json()
@@ -1139,6 +1143,578 @@ def register_environment_tools(mcp: FastMCP, client: UEClient) -> None:
             return client.format_json(payload)
         except UEConnectionError as exc:
             return client.format_json(_error("configure_pcg_graph", str(exc)))
+
+    # ==================================================================
+    # PHASE 5 · SPLINES, ROADS & STRUCTURE COMPOSITION
+    # ==================================================================
+
+    @mcp.tool()
+    async def create_spline_actor(
+        points: Annotated[
+            str,
+            "JSON array of world-space control points, each {\"x\",\"y\",\"z\"} in cm. "
+            "Example: '[{\"x\":0,\"y\":0,\"z\":0},{\"x\":2000,\"y\":0,\"z\":0}]'. "
+            "At least two points are required.",
+        ],
+        closed_loop: Annotated[
+            bool,
+            "If true, the spline connects its last point back to the first "
+            "(useful for closed roads, fences, or loops). Default false.",
+        ] = False,
+        label: Annotated[
+            str,
+            "Actor label for the spline actor. Auto-generated if empty.",
+        ] = "",
+    ) -> str:
+        """Spawn an actor carrying a spline through the given control points.
+
+        This is the low-level primitive for roads, fences, rivers, and walls —
+        anything that needs a mesh tiled along a path. Follow up with
+        add_spline_mesh to tile a StaticMesh along the resulting spline, or use
+        create_road_segment for the common start/end/width road case directly.
+
+        Returns the spawned actor name/path so it can be passed to add_spline_mesh.
+        """
+        import json as _json
+
+        try:
+            parsed_points = _json.loads(points)
+        except _json.JSONDecodeError as exc:
+            return client.format_json(
+                _error("create_spline_actor", f"points is not valid JSON: {exc}")
+            )
+        if not isinstance(parsed_points, list) or len(parsed_points) < 2:
+            return client.format_json(
+                _error(
+                    "create_spline_actor",
+                    "points must be a JSON array with at least 2 entries.",
+                )
+            )
+        for i, pt in enumerate(parsed_points):
+            if not isinstance(pt, dict) or not {"x", "y", "z"} <= pt.keys():
+                return client.format_json(
+                    _error(
+                        "create_spline_actor",
+                        f"points[{i}] must be an object with 'x', 'y', and 'z' keys, "
+                        f"got {pt!r}.",
+                    )
+                )
+
+        try:
+            result = await client.create_spline_actor(
+                points=parsed_points, closed_loop=closed_loop, label=label
+            )
+            payload: dict[str, Any] = {
+                **result,
+                "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+            return client.format_json(payload)
+        except UEConnectionError as exc:
+            return client.format_json(_error("create_spline_actor", str(exc)))
+
+    @mcp.tool()
+    async def add_spline_mesh(
+        spline_actor: Annotated[
+            str,
+            "Actor name/label of a spline actor, as returned by create_spline_actor.",
+        ],
+        mesh_path: Annotated[
+            str,
+            "Full /Game/... path to the StaticMesh to tile along the spline. "
+            "Example: '/Game/Environment/Roads/SM_RoadStraight'.",
+        ],
+        start_scale_x: Annotated[float, "Cross-section X scale at segment start."] = 1.0,
+        start_scale_y: Annotated[float, "Cross-section Y scale at segment start."] = 1.0,
+        end_scale_x: Annotated[float, "Cross-section X scale at segment end."] = 1.0,
+        end_scale_y: Annotated[float, "Cross-section Y scale at segment end."] = 1.0,
+    ) -> str:
+        """Tile a StaticMesh along every segment of an existing spline actor.
+
+        One SplineMeshComponent is added per segment between consecutive
+        spline points, so the mesh follows curves as well as straight runs.
+        Use uniform start/end scale for a constant cross-section (typical for
+        roads and walls), or vary them for tapered fences and rivers.
+
+        Requires: Python Script Plugin enabled in the editor (live mode).
+        """
+        start_scale = {"x": start_scale_x, "y": start_scale_y}
+        end_scale = {"x": end_scale_x, "y": end_scale_y}
+        try:
+            result = await client.add_spline_mesh(
+                spline_actor=spline_actor,
+                mesh_path=mesh_path,
+                start_scale=start_scale,
+                end_scale=end_scale,
+            )
+            payload: dict[str, Any] = {
+                **result,
+                "tiled_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+            return client.format_json(payload)
+        except UEConnectionError as exc:
+            return client.format_json(_error("add_spline_mesh", str(exc)))
+
+    @mcp.tool()
+    async def create_road_segment(
+        start_x: Annotated[float, "World X of the road start point (cm)."],
+        start_y: Annotated[float, "World Y of the road start point (cm)."],
+        end_x: Annotated[float, "World X of the road end point (cm)."],
+        end_y: Annotated[float, "World Y of the road end point (cm)."],
+        width_cm: Annotated[
+            float,
+            "Target road width in cm, used to scale the road mesh's cross-section. "
+            "Example: 500 for a single-lane road, 1000 for a two-lane road.",
+        ] = 500.0,
+        road_mesh_path: Annotated[
+            str,
+            "Full /Game/... path to the road StaticMesh to tile along the "
+            "segment. Leave empty to create the spline only (no mesh tiling).",
+        ] = "",
+        lane_marking_mesh_path: Annotated[
+            str,
+            "Optional /Game/... path to a thin lane-marking mesh, tiled "
+            "along the same spline slightly above the road surface.",
+        ] = "",
+        start_z: Annotated[
+            float,
+            "World Z of the start point (cm). Ignored if snap_to_ground=true.",
+        ] = 0.0,
+        end_z: Annotated[
+            float,
+            "World Z of the end point (cm). Ignored if snap_to_ground=true.",
+        ] = 0.0,
+        snap_to_ground: Annotated[
+            bool,
+            "Line-trace the start and end points down to the terrain surface "
+            "before building the spline. Default true.",
+        ] = True,
+        use_spatial_validation: Annotated[
+            bool,
+            "Reserve the road's footprint in the occupancy grid so later "
+            "structure/foliage placement avoids it. Default true.",
+        ] = True,
+        allow_overlap: Annotated[
+            bool,
+            "Skip the occupancy grid overlap check (e.g. for intersecting "
+            "road segments). Default false.",
+        ] = False,
+        label: Annotated[
+            str,
+            "Label prefix for the spline actor and occupancy grid entry. "
+            "Auto-generated if empty.",
+        ] = "",
+    ) -> str:
+        """Build a road between two points: spline + tiled road mesh + lane markings.
+
+        The higher-level composition tool for roads — wraps create_spline_actor
+        and add_spline_mesh so the AI can go from "a road from A to B" to a
+        built segment in one call, instead of manually assembling a spline.
+
+        The segment's footprint is registered in the occupancy grid as a single
+        oriented bounding box (length × width) so later spawn_actor_safe /
+        build_structure calls won't place things on top of the road.
+        """
+        import asyncio as _asyncio
+        import math as _math
+        import uuid as _uuid
+
+        from ue5_mcp.spatial.schema import Vector3
+
+        seg_label = label or f"Road_{_uuid.uuid4().hex[:6]}"
+
+        z0, z1 = start_z, end_z
+        if snap_to_ground:
+            try:
+                trace_start, trace_end = await _asyncio.gather(
+                    client.line_trace_surface(start_x, start_y, 10000.0),
+                    client.line_trace_surface(end_x, end_y, 10000.0),
+                )
+                if trace_start.get("hit"):
+                    z0 = float(trace_start["location"].get("Z", start_z))
+                if trace_end.get("hit"):
+                    z1 = float(trace_end["location"].get("Z", end_z))
+            except UEConnectionError:
+                pass  # fall back to the provided start_z/end_z
+
+        dx = end_x - start_x
+        dy = end_y - start_y
+        length_cm = _math.hypot(dx, dy)
+        if length_cm == 0:
+            return client.format_json(
+                _error(
+                    "create_road_segment",
+                    "start and end points are identical — road would have zero length.",
+                )
+            )
+        yaw_deg = _math.degrees(_math.atan2(dy, dx))
+        mid = Vector3(x=(start_x + end_x) / 2, y=(start_y + end_y) / 2, z=(z0 + z1) / 2)
+        half_extents = Vector3(x=length_cm / 2, y=width_cm / 2, z=150.0)
+
+        # Hold the grid lock for the full check -> build -> mark sequence so two
+        # concurrent overlapping road/structure calls can't both pass the
+        # overlap check before either registers its footprint (see
+        # SpawnValidator.validate_and_mark, which the same lock serializes
+        # against).
+        async with OCCUPANCY_GRID._lock:
+            if use_spatial_validation and not allow_overlap:
+                if not OCCUPANCY_GRID.is_obb_free(mid, half_extents, yaw_deg):
+                    return client.format_json(
+                        _error(
+                            "create_road_segment",
+                            "Proposed road segment overlaps an existing occupancy grid "
+                            "entry. Set allow_overlap=true to bypass (e.g. for "
+                            "intersections).",
+                        )
+                    )
+
+            points = [
+                {"x": start_x, "y": start_y, "z": z0},
+                {"x": end_x, "y": end_y, "z": z1},
+            ]
+            try:
+                spline_result = await client.create_spline_actor(
+                    points=points, closed_loop=False, label=f"{seg_label}_spline"
+                )
+            except UEConnectionError as exc:
+                return client.format_json(_error("create_road_segment", str(exc)))
+
+            spline_actor = spline_result.get("spline_actor", "")
+            road_mesh_result: dict[str, Any] | None = None
+            lane_marking_result: dict[str, Any] | None = None
+            mesh_warnings: list[str] = []
+            build_success = True
+
+            if road_mesh_path:
+                try:
+                    bounds = await client.get_asset_static_mesh_bounds(road_mesh_path)
+                    native_width = max(float(bounds.get("extent", {}).get("Y", 100.0)) * 2, 1.0)
+                except Exception as exc:
+                    native_width = 100.0
+                    mesh_warnings.append(
+                        f"Could not resolve bounds for '{road_mesh_path}' ({exc}); "
+                        f"assumed a native width of {native_width}cm, so width_cm may "
+                        "not be accurate."
+                    )
+                # Vector2D scale on a SplineMeshComponent with the default
+                # ForwardAxis=X maps X -> mesh local Y (width), Y -> mesh local Z
+                # (height) — so the width ratio goes in the "x" slot.
+                scale_x = width_cm / native_width
+                try:
+                    road_mesh_result = await client.add_spline_mesh(
+                        spline_actor=spline_actor,
+                        mesh_path=road_mesh_path,
+                        start_scale={"x": scale_x, "y": 1.0},
+                        end_scale={"x": scale_x, "y": 1.0},
+                    )
+                except UEConnectionError as exc:
+                    road_mesh_result = {"success": False, "error": str(exc)}
+                if not road_mesh_result.get("success", True):
+                    build_success = False
+
+            if lane_marking_mesh_path:
+                try:
+                    lane_marking_result = await client.add_spline_mesh(
+                        spline_actor=spline_actor,
+                        mesh_path=lane_marking_mesh_path,
+                        start_scale={"x": 1.0, "y": 1.0},
+                        end_scale={"x": 1.0, "y": 1.0},
+                    )
+                except UEConnectionError as exc:
+                    lane_marking_result = {"success": False, "error": str(exc)}
+                if not lane_marking_result.get("success", True):
+                    build_success = False
+
+            grid_registered = False
+            if use_spatial_validation and build_success:
+                try:
+                    OCCUPANCY_GRID.mark_occupied(
+                        label=seg_label,
+                        center=mid,
+                        extent=half_extents,
+                        yaw_deg=yaw_deg,
+                        use_obb=True,
+                    )
+                    grid_registered = True
+                except ValueError as exc:
+                    mesh_warnings.append(f"Grid mark skipped: {exc}")
+
+        payload: dict[str, Any] = {
+            "success": build_success,
+            "label": seg_label,
+            "spline_actor": spline_actor,
+            "start": {"x": start_x, "y": start_y, "z": z0},
+            "end": {"x": end_x, "y": end_y, "z": z1},
+            "length_cm": round(length_cm, 2),
+            "width_cm": width_cm,
+            "yaw_deg": round(yaw_deg, 2),
+            "road_mesh": road_mesh_result,
+            "lane_markings": lane_marking_result,
+            "grid_registered": grid_registered,
+            "built_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        if mesh_warnings:
+            payload["warnings"] = mesh_warnings
+        return client.format_json(payload)
+
+    @mcp.tool()
+    async def list_structure_templates() -> str:
+        """Return all available structure presets for build_structure.
+
+        Each entry contains the structure type key, display name, description,
+        overall footprint, and the list of component ids/categories it is
+        assembled from — use this to discover valid structure_type values and
+        which categories accept component_overrides before calling build_structure.
+
+        Built-in presets: cabin, house_small, house_large, warehouse, tower,
+        wall_segment, archway.
+        """
+        from ue5_mcp.structures import load_structure_templates
+
+        templates = load_structure_templates()
+        summary = {
+            key: {
+                "display_name": tpl["display_name"],
+                "description": tpl["description"],
+                "footprint_cm": tpl["footprint_cm"],
+                "components": [
+                    {"id": c["id"], "category": c["category"]} for c in tpl["components"]
+                ],
+            }
+            for key, tpl in templates.items()
+        }
+        return client.format_json(
+            {
+                "templates": summary,
+                "total": len(summary),
+                "queried_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+        )
+
+    @mcp.tool()
+    async def build_structure(
+        structure_type: Annotated[
+            str,
+            "Structure preset key. Use list_structure_templates to see all "
+            "options. Built-in: 'cabin', 'house_small', 'house_large', "
+            "'warehouse', 'tower', 'wall_segment', 'archway'.",
+        ],
+        location_x: Annotated[float, "World X of the structure origin (cm)."] = 0.0,
+        location_y: Annotated[float, "World Y of the structure origin (cm)."] = 0.0,
+        location_z: Annotated[
+            float,
+            "Additional Z offset above the snapped ground (cm). Ignored for "
+            "the ground height itself when snap_to_ground=true.",
+        ] = 0.0,
+        yaw: Annotated[float, "Rotate the whole structure around Z (degrees)."] = 0.0,
+        uniform_scale: Annotated[
+            float,
+            "Uniform scale multiplier applied to every component and the "
+            "footprint used for overlap checks. Default 1.0.",
+        ] = 1.0,
+        component_overrides: Annotated[
+            str,
+            "JSON object mapping a component id or category to a real "
+            "/Game/... asset path in your project, overriding the template's "
+            "placeholder default_asset. Example: "
+            "'{\"wall\":\"/Game/Kit/SM_Wall_Stone\",\"roof\":\"/Game/Kit/SM_Roof_Tin\"}'. "
+            "Use list_project_assets first to find real paths.",
+        ] = "{}",
+        snap_to_ground: Annotated[
+            bool,
+            "Line-trace the origin down to the terrain surface before placing "
+            "components. Default true.",
+        ] = True,
+        use_spatial_validation: Annotated[
+            bool,
+            "Check the occupancy grid for the structure's overall footprint "
+            "before building, and register it afterwards. Default true.",
+        ] = True,
+        allow_overlap: Annotated[
+            bool,
+            "Skip the occupancy grid overlap check. Default false.",
+        ] = False,
+        label: Annotated[
+            str,
+            "Label prefix for spawned components and the occupancy grid "
+            "entry. Auto-generated if empty.",
+        ] = "",
+    ) -> str:
+        """Assemble a preset structure (cabin, house, warehouse, tower, ...) from components.
+
+        Reads the named template from structure_templates.json, resolves each
+        component's asset path (component_overrides > template default), then
+        spawns every component at its rotated/scaled offset from the origin.
+        The whole structure is registered in the occupancy grid as one oriented
+        bounding box so later placements don't collide with it.
+
+        Use list_structure_templates first to see available structure_type
+        values and which component ids/categories can be overridden.
+        """
+        import asyncio as _asyncio
+        import json as _json
+        import uuid as _uuid
+
+        from ue5_mcp.spatial.schema import Vector3
+        from ue5_mcp.structures import (
+            get_structure_template,
+            resolve_component_asset,
+            rotate_offset_xy,
+        )
+
+        template = get_structure_template(structure_type)
+        if template is None:
+            from ue5_mcp.structures import load_structure_templates
+
+            valid = sorted(load_structure_templates().keys())
+            return client.format_json(
+                _error(
+                    "build_structure",
+                    f"Unknown structure_type '{structure_type}'. "
+                    f"Valid options: {', '.join(valid)}.",
+                )
+            )
+
+        try:
+            overrides = _json.loads(component_overrides)
+        except _json.JSONDecodeError as exc:
+            return client.format_json(
+                _error("build_structure", f"component_overrides is not valid JSON: {exc}")
+            )
+        if not isinstance(overrides, dict):
+            return client.format_json(
+                _error("build_structure", "component_overrides must be a JSON object.")
+            )
+
+        struct_label = label or f"{structure_type}_{_uuid.uuid4().hex[:6]}"
+
+        origin_z = location_z
+        if snap_to_ground:
+            try:
+                trace = await client.line_trace_surface(location_x, location_y, 10000.0)
+                if trace.get("hit"):
+                    origin_z = float(trace["location"].get("Z", 0.0)) + location_z
+            except UEConnectionError:
+                pass  # fall back to the raw location_z
+
+        origin = Vector3(x=location_x, y=location_y, z=origin_z)
+        footprint = template["footprint_cm"]
+        half_extents = Vector3(
+            x=footprint["x"] / 2 * uniform_scale,
+            y=footprint["y"] / 2 * uniform_scale,
+            z=footprint["z"] / 2 * uniform_scale,
+        )
+
+        async def _spawn_component(component: dict[str, Any]) -> dict[str, Any]:
+            asset_path = resolve_component_asset(component, overrides)
+            offset = component["offset"]
+            world_dx, world_dy = rotate_offset_xy(offset["x"], offset["y"], yaw)
+            comp_location = {
+                "x": origin.x + world_dx * uniform_scale,
+                "y": origin.y + world_dy * uniform_scale,
+                "z": origin.z + offset["z"] * uniform_scale,
+            }
+            comp_rotation_src = component["rotation"]
+            comp_rotation = {
+                "pitch": comp_rotation_src["pitch"],
+                "yaw": (comp_rotation_src["yaw"] + yaw) % 360,
+                "roll": comp_rotation_src["roll"],
+            }
+            comp_scale_src = component["scale"]
+            comp_scale = {
+                "x": comp_scale_src["x"] * uniform_scale,
+                "y": comp_scale_src["y"] * uniform_scale,
+                "z": comp_scale_src["z"] * uniform_scale,
+            }
+            try:
+                spawn_result = await client.spawn_actor(
+                    asset_path, comp_location, comp_rotation, comp_scale
+                )
+                return {
+                    "ok": True,
+                    "id": component["id"],
+                    "category": component["category"],
+                    "asset_path": asset_path,
+                    "actor": spawn_result.get("spawned_actor"),
+                    "location": comp_location,
+                }
+            except UEConnectionError as exc:
+                return {
+                    "ok": False,
+                    "id": component["id"],
+                    "asset_path": asset_path,
+                    "error": str(exc),
+                }
+
+        # Hold the grid lock for the full check -> spawn -> mark sequence so two
+        # concurrent overlapping build_structure/create_road_segment calls can't
+        # both pass the overlap check before either registers its footprint
+        # (see SpawnValidator.validate_and_mark, which the same lock serializes
+        # against). Components spawn concurrently since they're independent.
+        async with OCCUPANCY_GRID._lock:
+            if use_spatial_validation and not allow_overlap:
+                if not OCCUPANCY_GRID.is_obb_free(origin, half_extents, yaw):
+                    return client.format_json(
+                        _error(
+                            "build_structure",
+                            f"Proposed '{structure_type}' footprint overlaps an existing "
+                            "occupancy grid entry. Choose a different location, set "
+                            "allow_overlap=true, or use validate_spawn-style manual checks.",
+                        )
+                    )
+
+            results = await _asyncio.gather(
+                *(_spawn_component(c) for c in template["components"])
+            )
+            spawned = [
+                {k: v for k, v in r.items() if k != "ok"} for r in results if r["ok"]
+            ]
+            failed = [
+                {k: v for k, v in r.items() if k != "ok"} for r in results if not r["ok"]
+            ]
+
+            grid_registered = False
+            grid_warning: str | None = None
+            if use_spatial_validation and not failed:
+                try:
+                    OCCUPANCY_GRID.mark_occupied(
+                        label=struct_label,
+                        center=origin,
+                        extent=half_extents,
+                        yaw_deg=yaw,
+                        use_obb=True,
+                    )
+                    grid_registered = True
+                except ValueError as exc:
+                    grid_warning = f"Grid mark skipped: {exc}"
+
+        payload: dict[str, Any] = {
+            "success": len(failed) == 0,
+            "structure_type": structure_type,
+            "label": struct_label,
+            "origin": origin.to_dict(),
+            "yaw_deg": yaw,
+            "footprint_cm": footprint,
+            "components_spawned": len(spawned),
+            "components_failed": len(failed),
+            "spawned": spawned,
+            "failed": failed,
+            "grid_registered": grid_registered,
+            "note": (
+                "default_asset paths in structure_templates.json are placeholders — "
+                "pass component_overrides with real /Game/... paths from your project "
+                "for accurate results."
+            ),
+            "built_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        if failed and not grid_registered:
+            payload["note"] += (
+                " One or more components failed to spawn, so the occupancy grid "
+                "was NOT reserved for this structure — this location remains free "
+                "for a retry."
+            )
+        if grid_warning:
+            payload["warnings"] = [grid_warning]
+        return client.format_json(payload)
 
 
 # ---------------------------------------------------------------------------
